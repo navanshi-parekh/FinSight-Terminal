@@ -6,12 +6,11 @@ import {
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// --- ADDED FOR DEPLOYMENT ---
+// --- DYNAMIC API BASE URL ---
 const API_BASE = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
   ? "http://127.0.0.1:8000" 
   : "https://finsight-api-r9d6.onrender.com";
 
-// --- NEW COMPONENT: LOADING SKELETON ---
 const SkeletonCard = ({ theme }) => (
   <div style={{ ...cardStyle, backgroundColor: theme.card, backdropFilter: theme.glass, border: `1px solid ${theme.border}`, overflow: 'hidden' }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
@@ -310,7 +309,7 @@ function App() {
                 {results.map((stock, i) => {
                   const statusColor = stock.risk === "High" ? "#f87171" : stock.risk === "Medium" ? "#fbbf24" : "#34d399";
                   return (
-                    <div key={i} style={{ ...cardStyle, backgroundColor: theme.card, backdropFilter: theme.glass, border: `1px solid ${theme.border}` }}>
+                    <div key={i} style={{ ...cardStyle, backgroundColor: theme.card, backdropFilter: theme.glass, border: `1px solid ${theme.border}`, boxShadow: '0 20px 40px rgba(0,0,0,0.1)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
                         <div style={{ ...badgeStyle, backgroundColor: `${statusColor}22`, color: statusColor }}>{stock.recommendation}</div>
                         <div style={{ display: 'flex', gap: '10px' }}>
@@ -370,7 +369,6 @@ function App() {
                       <h2 style={{ margin: '10px 0', fontSize: '32px', color: riskData?.portfolio_beta > 1 ? '#f87171' : theme.accent }}>{riskData?.portfolio_beta || '0.00'}</h2>
                       <p style={{ fontSize: '11px', color: theme.subText }}>Market Shock Sensitivity</p>
                     </div>
-                    
                     <div title="Sector exposure helps you predict sector-specific headwinds by seeing where your money is concentrated." style={{ ...riskCardStyle, backgroundColor: theme.card, flex: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-around' }}>
                       <div style={{ textAlign: 'left' }}>
                         <span style={gridTitle}>SECTOR EXPOSURE</span>
@@ -389,14 +387,12 @@ function App() {
                         </ResponsiveContainer>
                       </div>
                     </div>
-
                     <div title="This score predicts portfolio stability based on how your stocks move relative to each other." style={{ ...riskCardStyle, borderTop: `4px solid #34d399`, backgroundColor: theme.card, cursor: 'help' }}>
                       <span style={gridTitle}>DIVERSIFICATION</span>
                       <h2 style={{ margin: '10px 0', fontSize: '32px', color: '#34d399' }}>{riskData?.diversification_score || '0'}%</h2>
                       <p style={{ fontSize: '11px', color: theme.subText }}>Stability Score</p>
                     </div>
                   </div>
-
                   <div style={{ ...cardStyle, backgroundColor: theme.card, width: '100%', border: `1px solid ${theme.border}`, padding: '0' }}>
                     <div style={{ padding: '25px', borderBottom: `1px solid ${theme.border}` }}>
                         <h2 style={{ margin: 0, fontSize: '20px', fontWeight: '800' }}>Active Holdings Analytics</h2>
@@ -404,12 +400,7 @@ function App() {
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <thead>
                         <tr style={{ backgroundColor: 'rgba(100,116,139,0.05)', color: theme.subText, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                          <th style={{ padding: '20px' }}>Asset</th>
-                          <th>Quantity</th>
-                          <th>Avg Buy</th>
-                          <th>Curr Gain</th>
-                          <th>Beta</th>
-                          <th>Action</th>
+                          <th style={{ padding: '20px' }}>Asset</th><th>Quantity</th><th>Avg Buy</th><th>Curr Gain</th><th>Beta</th><th>Action</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -419,15 +410,10 @@ function App() {
                           return (
                             <tr key={idx} style={{ borderBottom: `1px solid ${theme.border}`, fontSize: '14px', transition: '0.2s' }}>
                               <td style={{ padding: '20px', fontWeight: '800' }}>{item.symbol}</td>
-                              <td>{item.qty}</td>
-                              <td>₹{item.avgPrice.toFixed(2)}</td>
-                              <td style={{ color: pnl >= 0 ? '#34d399' : '#f87171', fontWeight: 'bold' }}>
-                                ₹{pnl.toFixed(2)}
-                              </td>
+                              <td>{item.qty}</td><td>₹{item.avgPrice.toFixed(2)}</td>
+                              <td style={{ color: pnl >= 0 ? '#34d399' : '#f87171', fontWeight: 'bold' }}>₹{pnl.toFixed(2)}</td>
                               <td style={{ cursor: 'help' }} title="Market sensitivity specific to this ticker.">{riskData?.individual_betas[item.symbol] || '--'}</td>
-                              <td>
-                                <button onClick={() => handleRemoveHolding(item.symbol)} style={deleteBtnStyle}>✕</button>
-                              </td>
+                              <td><button onClick={() => handleRemoveHolding(item.symbol)} style={deleteBtnStyle}>✕</button></td>
                             </tr>
                           );
                         })}
@@ -442,7 +428,7 @@ function App() {
       </div>
     </>
   );
-}
+} // <--- THIS WAS MISSING IN YOUR VERSION
 
 const SuggestionsList = ({ suggestions, onSelect, theme }) => (
   <ul style={{ ...dropdownStyle, backgroundColor: theme.card, border: `1px solid ${theme.border}`, backdropFilter: 'blur(10px)' }}>
@@ -463,7 +449,6 @@ const closeBtnStyle = { position: 'absolute', top: '25px', right: '25px', backgr
 const logoutBtnStyle = { background: 'rgba(248, 113, 113, 0.1)', color: '#f87171', border: 'none', padding: '8px 15px', borderRadius: '10px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', marginTop: '15px', width: '100%' };
 const riskCardStyle = { flex: 1, padding: '25px', borderRadius: '24px', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)', textAlign: 'center' };
 const deleteBtnStyle = { background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: '16px', padding: '10px' };
-
 const tradeBtn = { padding: '8px 18px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '12px', fontSize: '12px', fontWeight: '800', cursor: 'pointer', transition: '0.2s' };
 const containerStyle = { padding: '60px 40px 60px 280px', fontFamily: "'Plus Jakarta Sans', sans-serif", minHeight: '100vh', transition: '0.3s' };
 const watchlistSidebar = { position: 'fixed', left: 0, top: 0, bottom: 0, width: '240px', padding: '40px 25px', textAlign: 'left', zIndex: 100 };
@@ -485,7 +470,5 @@ const themeToggleStyle = { width: '100%', padding: '14px', border: 'none', borde
 const pdfBtnStyle = { width: '100%', padding: '14px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '14px', fontWeight: '800', cursor: 'pointer', fontSize: '12px' };
 const dropdownStyle = { position: 'absolute', top: '55px', width: '100%', zIndex: 1000, listStyle: 'none', padding: '10px', borderRadius: '20px' };
 const suggestionItem = { padding: '14px', cursor: 'pointer', borderRadius: '12px', transition: '0.2s' };
-const loginSideBtn = { ...mainBtn, padding: '12px', fontSize: '12px', width: '100%', marginBottom: '25px', backgroundColor: '#38bdf8' };
-const balanceCard = { marginBottom: '30px', padding: '20px', backgroundColor: '#f8fafc', borderRadius: '18px', border: '1px solid #e1e4e8' };
 
 export default App;

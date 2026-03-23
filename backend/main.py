@@ -10,7 +10,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In production, you'll replace this with your Vercel/Netlify URL
+    allow_origins=["*"], # This allows the frontend to talk to the backend from any URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
