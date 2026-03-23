@@ -188,16 +188,32 @@ function App() {
     const ticker2 = t2.trim().toUpperCase();
     if (!ticker1) return;
     setLoading(true); setResults([]); setComparisonData(null); setShowDropdown(false);
+    
     const url = mode === "analyze" || manualTicker
       ? `${API_BASE}/api/analyze/${ticker1}`
       : `${API_BASE}/api/compare/${ticker1}/${ticker2}`;
-    fetch(url).then(res => res.json()).then(data => {
-      if (data.stocks) {
-        setResults(data.stocks);
-        setComparisonData({ winner: data.winner, verdict: data.verdict });
-      } else { setResults(Array.isArray(data) ? data : [data]); }
-      setLoading(false);
-    }).catch(() => setLoading(false));
+
+    fetch(url)
+      .then(res => {
+        if (!res.ok) throw new Error("Server error");
+        return res.json();
+      })
+      .then(data => {
+        if (data.error) {
+          alert(data.error);
+        } else if (data.stocks) {
+          setResults(data.stocks);
+          setComparisonData({ winner: data.winner, verdict: data.verdict });
+        } else {
+          // Force single analysis object into an array so .map() works
+          setResults([data]); 
+        }
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error("Terminal Error:", err);
+        setLoading(false);
+      });
   };
 
   const downloadPDF = () => {
