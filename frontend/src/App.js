@@ -7,9 +7,9 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 // --- ADDED FOR DEPLOYMENT ---
-const API_BASE = window.location.hostname === "localhost" 
+const API_BASE = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
   ? "http://127.0.0.1:8000" 
-  : "https://finsight-api-r9d6.onrender.com"; 
+  : "https://finsight-api-r9d6.onrender.com";
 
 // --- NEW COMPONENT: LOADING SKELETON ---
 const SkeletonCard = ({ theme }) => (
@@ -45,12 +45,11 @@ function App() {
   const [activeInput, setActiveInput] = useState(null); 
   const dropdownRef = useRef(null);
 
-  // --- REVISED AUTH & PREDICTION STATE ---
   const [user, setUser] = useState(null);
   const [balance, setBalance] = useState(0);
   const [portfolio, setPortfolio] = useState([]);
   const [riskData, setRiskData] = useState(null);
-  const [sectorData, setSectorData] = useState([]); // NEW: State for Pie Chart
+  const [sectorData, setSectorData] = useState([]); 
   const [loginForm, setLoginForm] = useState({ username: '', password: '', initial_balance: 1000000 });
   const [showLogin, setShowLogin] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
@@ -97,7 +96,6 @@ function App() {
       .then(data => { 
         if(!data.error) {
           setRiskData(data);
-          // Calculate Sector Data for Pie Chart
           const sectors = {};
           portfolio.forEach(item => {
             const sec = item.sector || "Other";
@@ -132,30 +130,6 @@ function App() {
           setShowLogin(false);
           fetchRiskAnalysis(data.user);
         }
-      } else { alert(data.message); }
-    });
-  };
-
-  const handleTrade = (stock) => {
-    if (!user) { setShowLogin(true); return; }
-    const qty = prompt(`Add ${stock.symbol} to your holdings (Quantity):`, "1");
-    if (!qty || isNaN(qty)) return;
-
-    fetch(`${API_BASE}/api/trade`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        username: user, symbol: stock.symbol, qty: parseInt(qty),
-        price: stock.price, action: "buy"
-      })
-    })
-    .then(res => res.json())
-    .then(data => {
-      if (data.success) {
-        setBalance(data.balance);
-        setPortfolio(data.portfolio);
-        fetchRiskAnalysis(user);
-        alert(`Holding updated for ${stock.symbol}`);
       } else { alert(data.message); }
     });
   };
@@ -247,14 +221,9 @@ function App() {
           <div style={{ ...loginCardStyle, backgroundColor: theme.card, backdropFilter: theme.glass, border: `1px solid ${theme.border}` }}>
             <button onClick={() => setShowLogin(false)} style={closeBtnStyle}>✕</button>
             <div style={{ marginBottom: '30px' }}>
-              <h2 style={{ color: theme.accent, margin: '0 0 5px 0', fontSize: '28px', fontWeight: '800' }}>
-                {isRegistering ? "Join FinSight" : "Welcome Back"}
-              </h2>
-              <p style={{ color: theme.subText, fontSize: '13px', margin: 0 }}>
-                {isRegistering ? "Create your institutional-grade profile" : "Unlock your predictive portfolio analytics"}
-              </p>
+              <h2 style={{ color: theme.accent, margin: '0 0 5px 0', fontSize: '28px', fontWeight: '800' }}>Join FinSight</h2>
+              <p style={{ color: theme.subText, fontSize: '13px', margin: 0 }}>Unlock your predictive portfolio analytics</p>
             </div>
-            
             <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', textAlign: 'left' }}>
                 <div>
                     <label style={labelStyle}>Username</label>
@@ -271,16 +240,10 @@ function App() {
                     </div>
                 )}
             </div>
-
-            <button style={{ ...mainBtn, width: '100%', marginTop: '30px', boxShadow: '0 4px 12px rgba(56, 189, 248, 0.3)' }} onClick={handleAuth}>
-              {isRegistering ? "Create Profile" : "Access Terminal"}
-            </button>
-
+            <button style={{ ...mainBtn, width: '100%', marginTop: '30px' }} onClick={handleAuth}>{isRegistering ? "Create Profile" : "Access Terminal"}</button>
             <p style={{ fontSize: '13px', color: theme.subText, marginTop: '20px' }}>
               {isRegistering ? "Already have a profile?" : "New to the platform?"} 
-              <span onClick={() => setIsRegistering(!isRegistering)} style={{ color: theme.accent, cursor: 'pointer', marginLeft: '8px', fontWeight: 'bold' }}>
-                {isRegistering ? "Sign In" : "Register Now"}
-              </span>
+              <span onClick={() => setIsRegistering(!isRegistering)} style={{ color: theme.accent, cursor: 'pointer', marginLeft: '8px', fontWeight: 'bold' }}>{isRegistering ? "Sign In" : "Register Now"}</span>
             </p>
           </div>
         </div>
@@ -290,20 +253,16 @@ function App() {
         <div style={{ ...watchlistSidebar, backgroundColor: theme.sidebar, borderRight: `1px solid ${theme.border}`, backdropFilter: theme.glass }}>
           <div style={{ padding: '0 0 20px 0', borderBottom: `1px solid ${theme.border}`, marginBottom: '20px' }}>
             <h2 style={{ fontSize: '22px', margin: 0, color: theme.accent, fontWeight: '800', letterSpacing: '-1px' }}>FinSight</h2>
-            <p style={{ fontSize: '10px', color: theme.subText, margin: 0, fontWeight: 'bold', textTransform: 'uppercase' }}>Predictive Engine v2.0</p>
           </div>
-
           {user ? (
             <div style={{ marginBottom: '30px', padding: '20px', backgroundColor: theme.inputBg, borderRadius: '18px', border: `1px solid ${theme.border}` }}>
-              <div style={{ fontSize: '10px', color: theme.subText, fontWeight: 'bold', marginBottom: '5px' }}>NET WORTH</div>
+              <div style={{ fontSize: '10px', color: theme.subText, fontWeight: 'bold' }}>NET WORTH</div>
               <div style={{ fontSize: '20px', fontWeight: '800', color: theme.accent }}>₹{balance.toLocaleString()}</div>
-              <div style={{ fontSize: '11px', color: theme.subText, marginTop: '8px' }}>Active: {user}</div>
               <button onClick={() => { setUser(null); setMode("analyze"); }} style={logoutBtnStyle}>Sign Out</button>
             </div>
           ) : (
-            <button onClick={() => setShowLogin(true)} style={{ ...mainBtn, padding: '12px', fontSize: '12px', width: '100%', marginBottom: '25px', backgroundColor: theme.accent }}>🔑 Member Login</button>
+            <button onClick={() => setShowLogin(true)} style={{ ...mainBtn, padding: '12px', fontSize: '12px', width: '100%', marginBottom: '25px' }}>🔑 Member Login</button>
           )}
-
           <h4 style={{ fontSize: '11px', color: theme.subText, letterSpacing: '1.5px', marginBottom: '15px', fontWeight: 'bold' }}>WATCHLIST</h4>
           <div style={{ maxHeight: 'calc(100vh - 400px)', overflowY: 'auto' }}>
             {watchlist.map(symbol => (
@@ -326,9 +285,7 @@ function App() {
                     style={{ ...mode === "portfolio" ? activeTabStyle : inactiveTabStyle, 
                     backgroundColor: mode === "portfolio" ? theme.accent : 'rgba(100,116,139,0.05)', 
                     color: mode === "portfolio" ? '#fff' : theme.text, borderRadius: '16px', padding: '12px 28px', border: `1px solid ${theme.border}`,
-                    display: 'flex', alignItems: 'center', gap: '10px', fontWeight: '800', cursor: 'pointer', transition: '0.2s' }}>
-              💼 My Portfolio
-            </button>
+                    fontWeight: '800', cursor: 'pointer' }}>💼 My Portfolio</button>
           </div>
           
           <div style={{ marginBottom: '40px', textAlign: 'center' }}>
@@ -345,12 +302,6 @@ function App() {
                   <input placeholder="Ticker" value={t1} onChange={(e) => handleSearch(e.target.value, 't1')} style={{ ...inputStyle, width: '180px', height: '48px', backgroundColor: theme.inputBg, color: theme.text, borderColor: theme.border }} />
                   {showDropdown && activeInput === 't1' && <SuggestionsList suggestions={suggestions} onSelect={(s) => { setT1(s); setShowDropdown(false); }} theme={theme} />}
                 </div>
-                {mode === "compare" && (
-                  <div style={{ position: 'relative' }}>
-                    <input placeholder="Ticker 2" value={t2} onChange={(e) => handleSearch(e.target.value, 't2')} style={{ ...inputStyle, width: '180px', height: '48px', backgroundColor: theme.inputBg, color: theme.text, borderColor: theme.border }} />
-                    {showDropdown && activeInput === 't2' && <SuggestionsList suggestions={suggestions} onSelect={(s) => { setT2(s); setShowDropdown(false); }} theme={theme} />}
-                  </div>
-                )}
                 <button onClick={() => handleAction()} style={{ ...mainBtn, height: '48px', padding: '0 25px', fontSize: '13px' }}>{loading ? "..." : "ANALYZE"}</button>
               </div>
 
@@ -359,7 +310,7 @@ function App() {
                 {results.map((stock, i) => {
                   const statusColor = stock.risk === "High" ? "#f87171" : stock.risk === "Medium" ? "#fbbf24" : "#34d399";
                   return (
-                    <div key={i} style={{ ...cardStyle, backgroundColor: theme.card, backdropFilter: theme.glass, border: `1px solid ${theme.border}`, boxShadow: '0 20px 40px rgba(0,0,0,0.1)' }}>
+                    <div key={i} style={{ ...cardStyle, backgroundColor: theme.card, backdropFilter: theme.glass, border: `1px solid ${theme.border}` }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
                         <div style={{ ...badgeStyle, backgroundColor: `${statusColor}22`, color: statusColor }}>{stock.recommendation}</div>
                         <div style={{ display: 'flex', gap: '10px' }}>
