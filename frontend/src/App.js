@@ -207,21 +207,21 @@ function App() {
       : `${API_BASE}/api/compare/${ticker1}/${ticker2}`;
 
     fetch(url)
-      .then(res => {
-        if (!res.ok) throw new Error("Server response was not ok");
-        return res.json();
-      })
+      .then(res => res.json())
       .then(data => {
         if (data.stocks) {
-          // This handles the 'compare' endpoint response
+          // This is for Comparison Mode
           setResults(data.stocks);
           setComparisonData({ winner: data.winner, verdict: data.verdict });
+        } else if (data.symbol) {
+          // This is for Single Analyze Mode
+          setResults([data]); 
         } else {
-          // This handles the single 'analyze' endpoint response
-          setResults(Array.isArray(data) ? data : [data]);
+          setResults([]); // Clear if error
         }
         setLoading(false);
       })
+        
       .catch(err => {
         console.error("Fetch error:", err);
         setLoading(false);
