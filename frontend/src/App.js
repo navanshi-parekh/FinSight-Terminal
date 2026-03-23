@@ -184,34 +184,46 @@ function App() {
   };
 
   const handleAction = (manualTicker = null) => {
+    // 1. Get the tickers
     const ticker1 = (manualTicker || t1).trim().toUpperCase();
     const ticker2 = t2.trim().toUpperCase();
-    if (!ticker1) return;
-    setLoading(true); setResults([]); setComparisonData(null); setShowDropdown(false);
     
-    const url = mode === "analyze" || manualTicker
+    if (!ticker1) return;
+    
+    // 2. If we are in compare mode, we NEED a second ticker
+    if (mode === "compare" && !ticker2) {
+      alert("Please enter a second ticker for comparison.");
+      return;
+    }
+
+    setLoading(true); 
+    setResults([]); 
+    setComparisonData(null); 
+    setShowDropdown(false);
+
+    // 3. Select the correct URL based on the mode
+    const url = (mode === "analyze" || manualTicker)
       ? `${API_BASE}/api/analyze/${ticker1}`
       : `${API_BASE}/api/compare/${ticker1}/${ticker2}`;
 
     fetch(url)
       .then(res => {
-        if (!res.ok) throw new Error("Server error");
+        if (!res.ok) throw new Error("Server response was not ok");
         return res.json();
       })
       .then(data => {
-        if (data.error) {
-          alert(data.error);
-        } else if (data.stocks) {
+        if (data.stocks) {
+          // This handles the 'compare' endpoint response
           setResults(data.stocks);
           setComparisonData({ winner: data.winner, verdict: data.verdict });
         } else {
-          // Force single analysis object into an array so .map() works
-          setResults([data]); 
+          // This handles the single 'analyze' endpoint response
+          setResults(Array.isArray(data) ? data : [data]);
         }
         setLoading(false);
       })
       .catch(err => {
-        console.error("Terminal Error:", err);
+        console.error("Fetch error:", err);
         setLoading(false);
       });
   };
@@ -313,15 +325,35 @@ function App() {
           {mode !== "portfolio" ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
               <div style={{ marginBottom: '60px', display: 'flex', justifyContent: 'center', gap: '12px' }} ref={dropdownRef}>
+                
+                {/* TICKER 1 INPUT */}
                 <div style={{ position: 'relative' }}>
-                  <input placeholder="Ticker" value={t1} onChange={(e) => handleSearch(e.target.value, 't1')} style={{ ...inputStyle, width: '180px', height: '48px', backgroundColor: theme.inputBg, color: theme.text, borderColor: theme.border }} />
+                  <input placeholder="Ticker 1" value={t1} onChange={(e) => handleSearch(e.target.value, 't1')} style={{ ...inputStyle, width: '180px', height: '48px', backgroundColor: theme.inputBg, color: theme.text, borderColor: theme.border }} />
                   {showDropdown && activeInput === 't1' && <SuggestionsList suggestions={suggestions} onSelect={(s) => { setT1(s); setShowDropdown(false); }} theme={theme} />}
                 </div>
+
+                {/* --- THIS IS THE NEW PART: TICKER 2 INPUT --- */}
+                {mode === "compare" && (
+                  <div style={{ position: 'relative' }}>
+                    <input placeholder="Ticker 2" value={t2} onChange={(e) => handleSearch(e.target.value, 't2')} style={{ ...inputStyle, width: '180px', height: '48px', backgroundColor: theme.inputBg, color: theme.text, borderColor: theme.border }} />
+                    {showDropdown && activeInput === 't2' && <SuggestionsList suggestions={suggestions} onSelect={(s) => { setT2(s); setShowDropdown(false); }} theme={theme} />}
+                  </div>
+                )}
+
                 <button onClick={() => handleAction()} style={{ ...mainBtn, height: '48px', padding: '0 25px', fontSize: '13px' }}>{loading ? "..." : "ANALYZE"}</button>
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'center', gap: '35px', flexWrap: 'wrap' }}>
                 {loading && <SkeletonCard theme={theme} />}
+                
+                {/* Show Winner Verdict if in Compare Mode */}
+                {mode === "compare" && comparisonData && (
+                  <div style={{ width: '100%', textAlign: 'center', marginBottom: '20px', padding: '15px', borderRadius: '15px', backgroundColor: 'rgba(56, 189, 248, 0.1)', border: `1px solid ${theme.accent}` }}>
+                    <h3 style={{ color: theme.accent, margin: 0 }}>🏆 Recommendation: {comparisonData.winner}</h3>
+                    <p style={{ margin: '5px 0 0 0', fontSize: '14px' }}>{comparisonData.verdict}</p>
+                  </div>
+                )}
+
                 {results.map((stock, i) => {
                   const statusColor = stock.risk === "High" ? "#f87171" : stock.risk === "Medium" ? "#fbbf24" : "#34d399";
                   return (
@@ -369,6 +401,7 @@ function App() {
               </div>
             </div>
           ) : (
+            // PORTFOLIO MODE
             <div style={{ width: '100%', textAlign: 'left' }}>
               {!user ? (
                 <div style={{ ...cardStyle, width: '100%', padding: '80px', textAlign: 'center', backgroundColor: theme.card, border: `1px solid ${theme.border}` }}>
@@ -385,6 +418,7 @@ function App() {
                       <h2 style={{ margin: '10px 0', fontSize: '32px', color: riskData?.portfolio_beta > 1 ? '#f87171' : theme.accent }}>{riskData?.portfolio_beta || '0.00'}</h2>
                       <p style={{ fontSize: '11px', color: theme.subText }}>Market Shock Sensitivity</p>
                     </div>
+                    
                     <div title="Sector exposure helps you predict sector-specific headwinds by seeing where your money is concentrated." style={{ ...riskCardStyle, backgroundColor: theme.card, flex: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-around' }}>
                       <div style={{ textAlign: 'left' }}>
                         <span style={gridTitle}>SECTOR EXPOSURE</span>
@@ -403,12 +437,14 @@ function App() {
                         </ResponsiveContainer>
                       </div>
                     </div>
+
                     <div title="This score predicts portfolio stability based on how your stocks move relative to each other." style={{ ...riskCardStyle, borderTop: `4px solid #34d399`, backgroundColor: theme.card, cursor: 'help' }}>
                       <span style={gridTitle}>DIVERSIFICATION</span>
                       <h2 style={{ margin: '10px 0', fontSize: '32px', color: '#34d399' }}>{riskData?.diversification_score || '0'}%</h2>
                       <p style={{ fontSize: '11px', color: theme.subText }}>Stability Score</p>
                     </div>
                   </div>
+
                   <div style={{ ...cardStyle, backgroundColor: theme.card, width: '100%', border: `1px solid ${theme.border}`, padding: '0' }}>
                     <div style={{ padding: '25px', borderBottom: `1px solid ${theme.border}` }}>
                         <h2 style={{ margin: 0, fontSize: '20px', fontWeight: '800' }}>Active Holdings Analytics</h2>
@@ -416,7 +452,12 @@ function App() {
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <thead>
                         <tr style={{ backgroundColor: 'rgba(100,116,139,0.05)', color: theme.subText, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                          <th style={{ padding: '20px' }}>Asset</th><th>Quantity</th><th>Avg Buy</th><th>Curr Gain</th><th>Beta</th><th>Action</th>
+                          <th style={{ padding: '20px' }}>Asset</th>
+                          <th>Quantity</th>
+                          <th>Avg Buy</th>
+                          <th>Curr Gain</th>
+                          <th>Beta</th>
+                          <th>Action</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -426,10 +467,15 @@ function App() {
                           return (
                             <tr key={idx} style={{ borderBottom: `1px solid ${theme.border}`, fontSize: '14px', transition: '0.2s' }}>
                               <td style={{ padding: '20px', fontWeight: '800' }}>{item.symbol}</td>
-                              <td>{item.qty}</td><td>₹{item.avgPrice.toFixed(2)}</td>
-                              <td style={{ color: pnl >= 0 ? '#34d399' : '#f87171', fontWeight: 'bold' }}>₹{pnl.toFixed(2)}</td>
+                              <td>{item.qty}</td>
+                              <td>₹{item.avgPrice.toFixed(2)}</td>
+                              <td style={{ color: pnl >= 0 ? '#34d399' : '#f87171', fontWeight: 'bold' }}>
+                                ₹{pnl.toFixed(2)}
+                              </td>
                               <td style={{ cursor: 'help' }} title="Market sensitivity specific to this ticker.">{riskData?.individual_betas[item.symbol] || '--'}</td>
-                              <td><button onClick={() => handleRemoveHolding(item.symbol)} style={deleteBtnStyle}>✕</button></td>
+                              <td>
+                                <button onClick={() => handleRemoveHolding(item.symbol)} style={deleteBtnStyle}>✕</button>
+                              </td>
                             </tr>
                           );
                         })}
