@@ -7,9 +7,9 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 // --- DYNAMIC API BASE URL ---
-const API_BASE = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
-  ? "http://127.0.0.1:8000" 
-  : "https://finsight-api-r9d6.onrender.com";
+// --- FORCED PRODUCTION API URL ---
+// Hardcoding the HTTPS URL ensures the frontend always looks at Render
+const API_BASE = "https://finsight-api-r9d6.onrender.com";
 
 const SkeletonCard = ({ theme }) => (
   <div style={{ ...cardStyle, backgroundColor: theme.card, backdropFilter: theme.glass, border: `1px solid ${theme.border}`, overflow: 'hidden' }}>
