@@ -1,6 +1,7 @@
 import sqlite3
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import time
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -222,3 +223,15 @@ if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
+def fetch_with_retry(ticker_symbol, retries=3):
+    for i in range(retries):
+        try:
+            data = yf.Ticker(ticker_symbol)
+            hist = data.history(period="1mo")
+            if hist.empty:
+                raise ValueError("Empty data")
+            return data
+        except Exception:
+            time.sleep(2 ** i)  # Wait 2s, then 4s, then 8s
+    return None
