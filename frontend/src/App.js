@@ -3,7 +3,7 @@ import {
   LineChart, Line, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, 
   CartesianGrid, Legend, ComposedChart, PieChart, Pie, Cell 
 } from 'recharts';
-import { jsPDF } from 'jsPDF';
+import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 // --- FORCED PRODUCTION API URL ---
