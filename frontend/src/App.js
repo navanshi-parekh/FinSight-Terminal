@@ -366,19 +366,19 @@ function App() {
                       <h1 style={{ color: theme.text, margin: '25px 0 10px 0', fontSize: '56px', fontWeight: '900', letterSpacing: '-2px' }}>₹{stock.price}</h1>
 
                       <div style={{ width: '100%', height: 240, margin: '20px 0' }}>
-                        <ResponsiveContainer>
-                          <ComposedChart data={stock.history}>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? "#30363d" : "#e1e4e8"} />
-                            <XAxis dataKey="date" hide /><YAxis domain={['auto', 'auto']} hide />
-                            <Tooltip contentStyle={{ backgroundColor: theme.card, borderRadius: '12px', border: `1px solid ${theme.border}`, color: theme.text }} />
-                            <Legend verticalAlign="top" height={36}/>
-                            <Line name="Price" type="monotone" dataKey="price" stroke={statusColor} strokeWidth={4} dot={false} />
-                            <Line name="20-Day SMA" type="monotone" dataKey="sma" stroke={isDarkMode ? "#8b949e" : "#64748b"} strokeWidth={2} dot={false} strokeDasharray="3 3" />
-                            <Line name="Volume Trend" type="monotone" dataKey="vpt" stroke="#a855f7" strokeWidth={2} dot={false} />
-                            <Line name="Nifty 50" type="monotone" dataKey="nifty" stroke="#94a3b8" strokeWidth={1} strokeDasharray="5 5" dot={false} />
-                          </ComposedChart>
-                        </ResponsiveContainer>
-                      </div>
+  <ResponsiveContainer>
+    <ComposedChart data={stock.history}>
+      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? "#30363d" : "#e1e4e8"} />
+      <XAxis dataKey="date" hide />
+      <YAxis domain={['auto', 'auto']} hide />
+      <Tooltip contentStyle={{ backgroundColor: theme.card, borderRadius: '12px', border: `1px solid ${theme.border}`, color: theme.text }} />
+      <Legend verticalAlign="top" height={36}/>
+      <Line name="Price" type="monotone" dataKey="price" stroke={statusColor} strokeWidth={4} dot={false} />
+      <Line name="20-Day SMA" type="monotone" dataKey="sma" stroke={isDarkMode ? "#8b949e" : "#64748b"} strokeWidth={2} dot={false} strokeDasharray="3 3" />
+      <Line name="Volume Trend" type="monotone" dataKey="vpt" stroke="#a855f7" strokeWidth={2} dot={false} />
+    </ComposedChart>
+  </ResponsiveContainer>
+</div>
 
                       <div style={gridContainer}>
                         <div style={{ ...gridBox, backgroundColor: theme.inputBg }}><span style={gridTitle}>GROWTH</span><br/><span style={{fontWeight:'bold', color: stock.return > 0 ? '#34d399' : '#f87171'}}>{stock.return}%</span></div>

@@ -9,6 +9,10 @@ import json
 
 app = FastAPI()
 
+@app.get("/")
+def read_root():
+    return {"status": "FinSight API is Live", "version": "3.0"}
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], # This allows the frontend to talk to the backend from any URL
@@ -218,20 +222,19 @@ def search_stocks(query: str):
 @app.get("/api/analyze/{ticker}")
 def analyze(ticker: str): return process_stock_data(ticker)
 
+def fetch_with_retry(ticker_symbol, retries=3):
+    for i in range(retries):
+        try:
+            data = yf.Ticker(ticker_symbol, session=session) # Use the session we added
+            hist = data.history(period="1mo")
+            if not hist.empty:
+                return data
+        except Exception:
+            time.sleep(2 ** i)
+    return None
+
 if __name__ == "__main__":
     import uvicorn
     import os
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
-
-def fetch_with_retry(ticker_symbol, retries=3):
-    for i in range(retries):
-        try:
-            data = yf.Ticker(ticker_symbol)
-            hist = data.history(period="1mo")
-            if hist.empty:
-                raise ValueError("Empty data")
-            return data
-        except Exception:
-            time.sleep(2 ** i)  # Wait 2s, then 4s, then 8s
-    return None
