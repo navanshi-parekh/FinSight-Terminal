@@ -6,7 +6,7 @@ import {
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// --- FORCED PRODUCTION API URL ---
+// --- PRODUCTION API URL ---
 const API_BASE = "https://finsight-api-r9d6.onrender.com";
 
 function App() {
@@ -46,7 +46,7 @@ function App() {
     glass: 'blur(12px)'
   };
 
-  // --- Sub-components moved inside to access 'theme' correctly and fix Render build crash ---
+  // Internal Components to fix the 'theme' crash on Render
   const SkeletonCard = () => (
     <div style={{ ...cardStyle, width: '460px', backgroundColor: theme.card, backdropFilter: theme.glass, border: `1px solid ${theme.border}`, overflow: 'hidden' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
@@ -81,48 +81,6 @@ function App() {
     localStorage.setItem("theme", isDarkMode ? "dark" : "light");
   }, [watchlist, isDarkMode]);
 
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-        setShowDropdown(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  const fetchRiskAnalysis = (username) => {
-    fetch(`${API_BASE}/api/portfolio-analysis/${username}`)
-      .then(res => res.json())
-      .then(data => { 
-        if(!data.error) {
-          setRiskData(data);
-          const sectors = {};
-          portfolio.forEach(item => {
-            const sec = item.sector || "Other";
-            sectors[sec] = (sectors[sec] || 0) + (item.qty * item.avgPrice);
-          });
-          setSectorData(Object.keys(sectors).map(key => ({ name: key, value: sectors[key] })));
-        }
-      });
-  };
-
-  const handleAuth = () => {
-    fetch(`${API_BASE}/api/${isRegistering ? "register" : "login"}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(loginForm)
-    })
-    .then(res => res.json())
-    .then(data => {
-      if (data.success) {
-        if (!isRegistering) {
-          setUser(data.user); setBalance(data.balance); setPortfolio(data.portfolio); setShowLogin(false); fetchRiskAnalysis(data.user);
-        } else { alert("Registered! Please login."); setIsRegistering(false); }
-      } else { alert(data.message); }
-    });
-  };
-
   const handleSearch = (val, target) => {
     if (target === 't1') setT1(val); else setT2(val);
     setActiveInput(target);
@@ -155,22 +113,25 @@ function App() {
       <style>{`
         .sidebar { position: fixed; left: 0; top: 0; bottom: 0; width: 240px; padding: 40px 25px; z-index: 100; border-right: 1px solid ${theme.border}; background: ${theme.sidebar}; backdrop-filter: ${theme.glass}; }
         .main-content { padding-left: 280px; padding-top: 60px; padding-right: 40px; padding-bottom: 60px; }
-        .search-area { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 60px; }
-        .input-group { position: relative; width: 180px; flex-shrink: 0; }
+        
+        /* FIX FOR BLOTCHED OVERLAP */
+        .search-area { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 60px; flex-wrap: nowrap; }
+        .input-box-wrap { position: relative; width: 180px; flex-shrink: 0; }
+        
         @media (max-width: 900px) {
           .sidebar { position: relative; width: 100%; height: auto; border-right: none; border-bottom: 1px solid ${theme.border}; padding: 25px; }
           .main-content { padding-left: 20px; padding-right: 20px; }
-          .search-area { flex-direction: column; width: 100%; }
-          .input-group { width: 100%; }
+          .search-area { flex-direction: column; }
+          .input-box-wrap { width: 100%; }
         }
       `}</style>
 
       {/* Sidebar */}
       <div className="sidebar">
-        <h2 style={{ fontSize: '22px', margin: 0, color: theme.accent, fontWeight: '800' }}>FinSight</h2>
+        <h2 style={{ color: theme.accent, fontWeight: '800', margin: '0 0 30px 0' }}>FinSight</h2>
         {user ? (
-          <div style={{ margin: '30px 0', padding: '20px', backgroundColor: theme.inputBg, borderRadius: '18px', border: `1px solid ${theme.border}` }}>
-            <div style={{ fontSize: '10px', color: theme.subText, fontWeight: 'bold' }}>NET WORTH</div>
+          <div style={{ margin: '20px 0', padding: '20px', backgroundColor: theme.inputBg, borderRadius: '18px', border: `1px solid ${theme.border}` }}>
+            <div style={{ fontSize: '10px', color: theme.subText }}>NET WORTH</div>
             <div style={{ fontSize: '20px', fontWeight: '800', color: theme.accent }}>₹{balance.toLocaleString()}</div>
           </div>
         ) : (
@@ -201,81 +162,60 @@ function App() {
           </div>
         </div>
 
-        {/* Search Bar Fix */}
+        {/* --- FIXED SEARCH BAR --- */}
         <div className="search-area" ref={dropdownRef}>
-          <div className="input-group">
-            <input placeholder="Ticker 1" value={t1} onChange={(e) => handleSearch(e.target.value, 't1')} style={{ ...inputStyle, width: '100%', backgroundColor: theme.inputBg, color: theme.text, borderColor: theme.border }} />
-            {showDropdown && activeInput === 't1' && <SuggestionsList suggestions={suggestions} onSelect={(s) => { setT1(s); setShowDropdown(false); }} />}
+          <div className="input-box-wrap">
+            <input placeholder="Ticker 1" value={t1} onChange={e => handleSearch(e.target.value, 't1')} style={{ ...inputStyle, width: '100%', backgroundColor: theme.inputBg, color: theme.text, borderColor: theme.border }} />
+            {showDropdown && activeInput === 't1' && <SuggestionsList suggestions={suggestions} onSelect={s => { setT1(s); setShowDropdown(false); }} />}
           </div>
           {mode === "compare" && (
-            <div className="input-group">
-              <input placeholder="Ticker 2" value={t2} onChange={(e) => handleSearch(e.target.value, 't2')} style={{ ...inputStyle, width: '100%', backgroundColor: theme.inputBg, color: theme.text, borderColor: theme.border }} />
-              {showDropdown && activeInput === 't2' && <SuggestionsList suggestions={suggestions} onSelect={(s) => { setT2(s); setShowDropdown(false); }} />}
+            <div className="input-box-wrap">
+              <input placeholder="Ticker 2" value={t2} onChange={e => handleSearch(e.target.value, 't2')} style={{ ...inputStyle, width: '100%', backgroundColor: theme.inputBg, color: theme.text, borderColor: theme.border }} />
+              {showDropdown && activeInput === 't2' && <SuggestionsList suggestions={suggestions} onSelect={s => { setT2(s); setShowDropdown(false); }} />}
             </div>
           )}
           <button onClick={() => handleAction()} style={mainBtn}>{loading ? "..." : "ANALYZE"}</button>
         </div>
 
-        {/* Comparison Header */}
-        {mode === "compare" && comparisonData && (
-          <div style={{ width: '100%', textAlign: 'center', marginBottom: '40px', padding: '20px', borderRadius: '20px', backgroundColor: 'rgba(56, 189, 248, 0.1)', border: `1px solid ${theme.accent}` }}>
-            <h3 style={{ color: theme.accent, margin: 0 }}>🏆 Recommendation: {comparisonData.winner}</h3>
-            <p style={{ margin: 0 }}>{comparisonData.verdict}</p>
-          </div>
-        )}
-
-        {/* Cards & Graphs */}
         <div style={{ display: 'flex', justifyContent: 'center', gap: '35px', flexWrap: 'wrap' }}>
           {loading && <SkeletonCard />}
-          {results.map((stock, i) => (
-            <div key={i} style={{ ...cardStyle, backgroundColor: theme.card, border: `1px solid ${theme.border}`, boxShadow: '0 20px 40px rgba(0,0,0,0.1)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-                <div style={{ ...badgeStyle, backgroundColor: theme.accent + '22', color: theme.accent }}>{stock.recommendation}</div>
-                <button onClick={() => setWatchlist([...watchlist, stock.symbol])} style={{ background: 'none', border: 'none', fontSize: '20px', color: theme.accent }}>☆</button>
-              </div>
-              <h2 style={{ fontSize: '32px', fontWeight: '900', margin: 0 }}>{stock.symbol}</h2>
-              <div style={aiBox}><p style={{ margin: 0, fontSize: '13px', lineHeight: '1.6' }}>{stock.ai_summary}</p></div>
-              <h1 style={{ color: theme.text, margin: '25px 0 10px 0', fontSize: '56px', fontWeight: '900' }}>₹{stock.price}</h1>
+          {results.map((stock, i) => {
+            const statusColor = stock.risk === "High" ? "#f87171" : stock.risk === "Medium" ? "#fbbf24" : "#34d399";
+            return (
+              <div key={i} className="stock-card" style={{ ...cardStyle, backgroundColor: theme.card, border: `1px solid ${theme.border}`, boxShadow: '0 20px 40px rgba(0,0,0,0.1)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+                  <div style={{ ...badgeStyle, backgroundColor: `${statusColor}22`, color: statusColor }}>{stock.recommendation}</div>
+                  <button onClick={() => setWatchlist([...watchlist, stock.symbol])} style={{ background: 'none', border: 'none', fontSize: '20px', color: theme.accent }}>☆</button>
+                </div>
+                <h2 style={{ fontSize: '32px', fontWeight: '900', margin: 0 }}>{stock.symbol}</h2>
+                <div style={aiBox}><p style={{ margin: 0, fontSize: '13px', lineHeight: '1.6' }}>{stock.ai_summary}</p></div>
+                <h1 style={{ color: theme.text, margin: '25px 0 10px 0', fontSize: '56px', fontWeight: '900' }}>₹{stock.price}</h1>
+                
+                {/* --- GRAPH RESTORED --- */}
+                <div style={{ width: '100%', height: 240, margin: '20px 0' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={stock.history}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={theme.border} />
+                      <XAxis dataKey="date" hide /><YAxis domain={['auto', 'auto']} hide />
+                      <Tooltip contentStyle={{ background: theme.card, borderRadius: '12px' }} />
+                      <Legend verticalAlign="top" height={36}/>
+                      <Line name="Price" type="monotone" dataKey="price" stroke={theme.accent} strokeWidth={4} dot={false} />
+                      <Line name="20-Day SMA" type="monotone" dataKey="sma" stroke="#8b949e" strokeWidth={2} dot={false} strokeDasharray="3 3" />
+                      <Line name="Volume Trend" type="monotone" dataKey="vpt" stroke="#a855f7" strokeWidth={2} dot={false} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
 
-              <div style={{ width: '100%', height: 240, margin: '20px 0' }}>
-                <ResponsiveContainer>
-                  <ComposedChart data={stock.history}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={theme.border} />
-                    <XAxis dataKey="date" hide /><YAxis domain={['auto', 'auto']} hide />
-                    <Tooltip contentStyle={{ background: theme.card, borderRadius: '12px' }} />
-                    <Legend verticalAlign="top" height={36}/>
-                    <Line name="Price" type="monotone" dataKey="price" stroke={theme.accent} strokeWidth={4} dot={false} />
-                    <Line name="20-Day SMA" type="monotone" dataKey="sma" stroke="#8b949e" strokeWidth={2} dot={false} strokeDasharray="3 3" />
-                    <Line name="Volume Trend" type="monotone" dataKey="vpt" stroke="#a855f7" strokeWidth={2} dot={false} />
-                  </ComposedChart>
-                </ResponsiveContainer>
+                <div style={gridContainer}>
+                  <div style={{ ...gridBox, backgroundColor: theme.inputBg }}>GROWTH<br/><b>{stock.return}%</b></div>
+                  <div style={{ ...gridBox, backgroundColor: theme.inputBg }}>SHARPE<br/><b>{stock.sharpe}</b></div>
+                  <div style={{ ...gridBox, backgroundColor: theme.inputBg }}>RISK<br/><b>{stock.risk}</b></div>
+                </div>
               </div>
-
-              <div style={gridContainer}>
-                <div style={{ ...gridBox, backgroundColor: theme.inputBg }}>GROWTH<br/><b>{stock.return}%</b></div>
-                <div style={{ ...gridBox, backgroundColor: theme.inputBg }}>SHARPE<br/><b>{stock.sharpe}</b></div>
-                <div style={{ ...gridBox, backgroundColor: theme.inputBg }}>RISK<br/><b>{stock.risk}</b></div>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
-      {showLogin && (
-        <div style={overlayStyle}>
-          <div style={{ ...loginCardStyle, backgroundColor: theme.card, border: `1px solid ${theme.border}` }}>
-            <button onClick={() => setShowLogin(false)} style={closeBtnStyle}>✕</button>
-            <h2 style={{ color: theme.accent }}>{isRegistering ? "Join Terminal" : "Access Terminal"}</h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <input style={inputStyle} placeholder="Username" onChange={e => setLoginForm({...loginForm, username: e.target.value})} />
-              <input type="password" style={inputStyle} placeholder="Password" onChange={e => setLoginForm({...loginForm, password: e.target.value})} />
-              <button style={mainBtn} onClick={handleAuth}>{isRegistering ? "Register" : "Login"}</button>
-              <p style={{ fontSize: '11px', cursor: 'pointer' }} onClick={() => setIsRegistering(!isRegistering)}>
-                {isRegistering ? "Already a member? Login" : "New? Create profile"}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -284,7 +224,8 @@ function App() {
 const cardStyle = { padding: '35px', borderRadius: '35px', width: '460px', textAlign: 'left' };
 const aiBox = { padding: '20px', borderRadius: '22px', marginTop: '15px', backgroundColor: 'rgba(100,116,139,0.05)' };
 const gridContainer = { display: 'flex', gap: '15px', marginTop: '25px' };
-const gridBox = { flex: 1, padding: '18px', borderRadius: '20px', textAlign: 'center', fontSize: '10px' };
+const gridBox = { flex: 1, padding: '18px', borderRadius: '20px', textAlign: 'center' };
+const gridTitle = { fontSize: '9px', color: '#8b949e', display: 'block', marginBottom: '6px', fontWeight: '900' };
 const inputStyle = { padding: '10px 20px', borderRadius: '15px', outline: 'none', border: '2px solid transparent', fontSize: '14px' };
 const mainBtn = { padding: '15px 35px', backgroundColor: '#38bdf8', color: 'white', border: 'none', borderRadius: '18px', fontWeight: '800', cursor: 'pointer' };
 const activeTabStyle = { padding: '12px 24px', backgroundColor: '#ffffff', color: '#1a1d23', borderRadius: '14px', border: 'none', fontWeight: '800' };
