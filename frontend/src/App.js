@@ -6,9 +6,7 @@ import {
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// --- DYNAMIC API BASE URL ---
 // --- FORCED PRODUCTION API URL ---
-// Hardcoding the HTTPS URL ensures the frontend always looks at Render
 const API_BASE = "https://finsight-api-r9d6.onrender.com";
 
 const SkeletonCard = ({ theme }) => (
@@ -184,14 +182,11 @@ function App() {
   };
 
   const handleAction = (manualTicker = null) => {
-    // 1. Get the tickers
     const ticker1 = (manualTicker || t1).trim().toUpperCase();
     const ticker2 = t2.trim().toUpperCase();
     
     if (!ticker1) return;
-    
-    // 2. If we are in compare mode, we NEED a second ticker
-    if (mode === "compare" && !ticker2) {
+    if (mode === "compare" && !manualTicker && !ticker2) {
       alert("Please enter a second ticker for comparison.");
       return;
     }
@@ -201,7 +196,6 @@ function App() {
     setComparisonData(null); 
     setShowDropdown(false);
 
-    // 3. Select the correct URL based on the mode
     const url = (mode === "analyze" || manualTicker)
       ? `${API_BASE}/api/analyze/${ticker1}`
       : `${API_BASE}/api/compare/${ticker1}/${ticker2}`;
@@ -210,18 +204,15 @@ function App() {
       .then(res => res.json())
       .then(data => {
         if (data.stocks) {
-          // This is for Comparison Mode
           setResults(data.stocks);
           setComparisonData({ winner: data.winner, verdict: data.verdict });
         } else if (data.symbol) {
-          // This is for Single Analyze Mode
           setResults([data]); 
         } else {
-          setResults([]); // Clear if error
+          setResults([]);
         }
         setLoading(false);
       })
-        
       .catch(err => {
         console.error("Fetch error:", err);
         setLoading(false);
@@ -234,8 +225,8 @@ function App() {
     doc.setFontSize(22); doc.text("FinSight Terminal Report", 14, 20);
     autoTable(doc, {
       startY: 35,
-      head: [['Symbol', 'Price', 'P/E', 'D/E', 'Sharpe', 'Risk', 'Verdict']],
-      body: results.map(s => [s.symbol, `INR ${s.price}`, s.pe_ratio, s.debt_equity, s.sharpe, s.risk, s.recommendation]),
+      head: [['Symbol', 'Price', 'P/E', 'Sharpe', 'Risk', 'Verdict']],
+      body: results.map(s => [s.symbol, `INR ${s.price}`, s.pe_ratio, s.sharpe, s.risk, s.recommendation]),
       headStyles: { fillColor: [56, 189, 248] }
     });
     doc.save(`FinSight_Report.pdf`);
@@ -325,14 +316,11 @@ function App() {
           {mode !== "portfolio" ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
               <div style={{ marginBottom: '60px', display: 'flex', justifyContent: 'center', gap: '12px' }} ref={dropdownRef}>
-                
-                {/* TICKER 1 INPUT */}
                 <div style={{ position: 'relative' }}>
-                  <input placeholder="Ticker 1" value={t1} onChange={(e) => handleSearch(e.target.value, 't1')} style={{ ...inputStyle, width: '180px', height: '48px', backgroundColor: theme.inputBg, color: theme.text, borderColor: theme.border }} />
+                  <input placeholder={mode === "compare" ? "Ticker 1" : "Ticker"} value={t1} onChange={(e) => handleSearch(e.target.value, 't1')} style={{ ...inputStyle, width: '180px', height: '48px', backgroundColor: theme.inputBg, color: theme.text, borderColor: theme.border }} />
                   {showDropdown && activeInput === 't1' && <SuggestionsList suggestions={suggestions} onSelect={(s) => { setT1(s); setShowDropdown(false); }} theme={theme} />}
                 </div>
 
-                {/* --- THIS IS THE NEW PART: TICKER 2 INPUT --- */}
                 {mode === "compare" && (
                   <div style={{ position: 'relative' }}>
                     <input placeholder="Ticker 2" value={t2} onChange={(e) => handleSearch(e.target.value, 't2')} style={{ ...inputStyle, width: '180px', height: '48px', backgroundColor: theme.inputBg, color: theme.text, borderColor: theme.border }} />
@@ -345,12 +333,11 @@ function App() {
 
               <div style={{ display: 'flex', justifyContent: 'center', gap: '35px', flexWrap: 'wrap' }}>
                 {loading && <SkeletonCard theme={theme} />}
-                
-                {/* Show Winner Verdict if in Compare Mode */}
+
                 {mode === "compare" && comparisonData && (
-                  <div style={{ width: '100%', textAlign: 'center', marginBottom: '20px', padding: '15px', borderRadius: '15px', backgroundColor: 'rgba(56, 189, 248, 0.1)', border: `1px solid ${theme.accent}` }}>
-                    <h3 style={{ color: theme.accent, margin: 0 }}>🏆 Recommendation: {comparisonData.winner}</h3>
-                    <p style={{ margin: '5px 0 0 0', fontSize: '14px' }}>{comparisonData.verdict}</p>
+                  <div style={{ width: '100%', textAlign: 'center', marginBottom: '40px', padding: '20px', borderRadius: '20px', backgroundColor: 'rgba(56, 189, 248, 0.1)', border: `1px solid ${theme.accent}` }}>
+                    <h3 style={{ color: theme.accent, margin: '0 0 5px 0', fontSize: '20px' }}>🏆 Recommendation: {comparisonData.winner}</h3>
+                    <p style={{ margin: 0, fontSize: '14px', color: theme.text }}>{comparisonData.verdict}</p>
                   </div>
                 )}
 
@@ -392,8 +379,8 @@ function App() {
                       <div style={gridContainer}>
                         <div style={{ ...gridBox, backgroundColor: theme.inputBg }}><span style={gridTitle}>GROWTH</span><br/><span style={{fontWeight:'bold', color: stock.return > 0 ? '#34d399' : '#f87171'}}>{stock.return}%</span></div>
                         <div style={{ ...gridBox, backgroundColor: theme.inputBg }}><span style={gridTitle}>P/E</span><br/><span style={{fontWeight:'bold'}}>{stock.pe_ratio}</span></div>
-                        <div title="Beta measures sensitivity to market movements. >1.0 means more volatile than Nifty 50." style={{ ...gridBox, backgroundColor: theme.inputBg, cursor: 'help' }}><span style={gridTitle}>BETA</span><br/><span style={{fontWeight:'bold'}}>1.21</span></div>
-                        <div title="Sharpe Ratio measures risk-adjusted return. >1.0 is considered good, >2.0 is very good." style={{ ...gridBox, backgroundColor: theme.inputBg, cursor: 'help' }}><span style={gridTitle}>SHARPE</span><br/><span style={{fontWeight:'bold'}}>{stock.sharpe}</span></div>
+                        <div title="Beta measures sensitivity to market movements." style={{ ...gridBox, backgroundColor: theme.inputBg, cursor: 'help' }}><span style={gridTitle}>BETA</span><br/><span style={{fontWeight:'bold'}}>1.21</span></div>
+                        <div title="Sharpe Ratio measures risk-adjusted return." style={{ ...gridBox, backgroundColor: theme.inputBg, cursor: 'help' }}><span style={gridTitle}>SHARPE</span><br/><span style={{fontWeight:'bold'}}>{stock.sharpe}</span></div>
                       </div>
                     </div>
                   );
@@ -401,25 +388,23 @@ function App() {
               </div>
             </div>
           ) : (
-            // PORTFOLIO MODE
             <div style={{ width: '100%', textAlign: 'left' }}>
               {!user ? (
                 <div style={{ ...cardStyle, width: '100%', padding: '80px', textAlign: 'center', backgroundColor: theme.card, border: `1px solid ${theme.border}` }}>
                   <div style={{ fontSize: '50px', marginBottom: '20px' }}>🔒</div>
                   <h2 style={{ color: theme.text, fontSize: '28px', fontWeight: '800' }}>Intelligence Locked</h2>
-                  <p style={{ color: theme.subText, maxWidth: '400px', margin: '0 auto 30px auto' }}>Login to sync your holdings, predict market sensitivity, and calculate diversification scores.</p>
+                  <p style={{ color: theme.subText, maxWidth: '400px', margin: '0 auto 30px auto' }}>Login to sync your holdings and see predictive analytics.</p>
                   <button style={{ ...mainBtn, width: '240px' }} onClick={() => setShowLogin(true)}>Join Terminal</button>
                 </div>
               ) : (
                 <>
                   <div style={{ display: 'flex', gap: '25px', marginBottom: '40px' }}>
-                    <div title="Beta measures sensitivity to market movements. >1.0 means more volatile than Nifty 50." style={{ ...riskCardStyle, borderTop: `4px solid ${riskData?.portfolio_beta > 1 ? '#f87171' : theme.accent}`, backgroundColor: theme.card, cursor: 'help' }}>
+                    <div style={{ ...riskCardStyle, borderTop: `4px solid ${riskData?.portfolio_beta > 1 ? '#f87171' : theme.accent}`, backgroundColor: theme.card }}>
                       <span style={gridTitle}>PORTFOLIO BETA</span>
                       <h2 style={{ margin: '10px 0', fontSize: '32px', color: riskData?.portfolio_beta > 1 ? '#f87171' : theme.accent }}>{riskData?.portfolio_beta || '0.00'}</h2>
-                      <p style={{ fontSize: '11px', color: theme.subText }}>Market Shock Sensitivity</p>
                     </div>
                     
-                    <div title="Sector exposure helps you predict sector-specific headwinds by seeing where your money is concentrated." style={{ ...riskCardStyle, backgroundColor: theme.card, flex: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-around' }}>
+                    <div style={{ ...riskCardStyle, backgroundColor: theme.card, flex: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-around' }}>
                       <div style={{ textAlign: 'left' }}>
                         <span style={gridTitle}>SECTOR EXPOSURE</span>
                         <h2 style={{ margin: '5px 0', fontSize: '18px' }}>Concentration</h2>
@@ -438,26 +423,17 @@ function App() {
                       </div>
                     </div>
 
-                    <div title="This score predicts portfolio stability based on how your stocks move relative to each other." style={{ ...riskCardStyle, borderTop: `4px solid #34d399`, backgroundColor: theme.card, cursor: 'help' }}>
+                    <div style={{ ...riskCardStyle, borderTop: `4px solid #34d399`, backgroundColor: theme.card }}>
                       <span style={gridTitle}>DIVERSIFICATION</span>
                       <h2 style={{ margin: '10px 0', fontSize: '32px', color: '#34d399' }}>{riskData?.diversification_score || '0'}%</h2>
-                      <p style={{ fontSize: '11px', color: theme.subText }}>Stability Score</p>
                     </div>
                   </div>
 
                   <div style={{ ...cardStyle, backgroundColor: theme.card, width: '100%', border: `1px solid ${theme.border}`, padding: '0' }}>
-                    <div style={{ padding: '25px', borderBottom: `1px solid ${theme.border}` }}>
-                        <h2 style={{ margin: 0, fontSize: '20px', fontWeight: '800' }}>Active Holdings Analytics</h2>
-                    </div>
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <thead>
-                        <tr style={{ backgroundColor: 'rgba(100,116,139,0.05)', color: theme.subText, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                          <th style={{ padding: '20px' }}>Asset</th>
-                          <th>Quantity</th>
-                          <th>Avg Buy</th>
-                          <th>Curr Gain</th>
-                          <th>Beta</th>
-                          <th>Action</th>
+                        <tr style={{ backgroundColor: 'rgba(100,116,139,0.05)', color: theme.subText, fontSize: '11px', textTransform: 'uppercase' }}>
+                          <th style={{ padding: '20px' }}>Asset</th><th>Quantity</th><th>Avg Buy</th><th>Curr Gain</th><th>Beta</th><th>Action</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -465,17 +441,12 @@ function App() {
                           const livePrice = results.find(r => r.symbol === item.symbol)?.price || item.avgPrice;
                           const pnl = (livePrice - item.avgPrice) * item.qty;
                           return (
-                            <tr key={idx} style={{ borderBottom: `1px solid ${theme.border}`, fontSize: '14px', transition: '0.2s' }}>
+                            <tr key={idx} style={{ borderBottom: `1px solid ${theme.border}`, fontSize: '14px' }}>
                               <td style={{ padding: '20px', fontWeight: '800' }}>{item.symbol}</td>
-                              <td>{item.qty}</td>
-                              <td>₹{item.avgPrice.toFixed(2)}</td>
-                              <td style={{ color: pnl >= 0 ? '#34d399' : '#f87171', fontWeight: 'bold' }}>
-                                ₹{pnl.toFixed(2)}
-                              </td>
-                              <td style={{ cursor: 'help' }} title="Market sensitivity specific to this ticker.">{riskData?.individual_betas[item.symbol] || '--'}</td>
-                              <td>
-                                <button onClick={() => handleRemoveHolding(item.symbol)} style={deleteBtnStyle}>✕</button>
-                              </td>
+                              <td>{item.qty}</td><td>₹{item.avgPrice.toFixed(2)}</td>
+                              <td style={{ color: pnl >= 0 ? '#34d399' : '#f87171', fontWeight: 'bold' }}>₹{pnl.toFixed(2)}</td>
+                              <td>{riskData?.individual_betas[item.symbol] || '--'}</td>
+                              <td><button onClick={() => handleRemoveHolding(item.symbol)} style={deleteBtnStyle}>✕</button></td>
                             </tr>
                           );
                         })}
@@ -490,7 +461,7 @@ function App() {
       </div>
     </>
   );
-} // <--- THIS WAS MISSING IN YOUR VERSION
+}
 
 const SuggestionsList = ({ suggestions, onSelect, theme }) => (
   <ul style={{ ...dropdownStyle, backgroundColor: theme.card, border: `1px solid ${theme.border}`, backdropFilter: 'blur(10px)' }}>
@@ -503,26 +474,26 @@ const SuggestionsList = ({ suggestions, onSelect, theme }) => (
   </ul>
 );
 
-// POLISHED STYLES
+// STYLES
 const overlayStyle = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.7)', zIndex: 2000, display: 'flex', justifyContent: 'center', alignItems: 'center', backdropFilter: 'blur(8px)' };
 const loginCardStyle = { padding: '50px', borderRadius: '32px', width: '420px', textAlign: 'center', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)', position: 'relative' };
 const labelStyle = { display: 'block', fontSize: '11px', fontWeight: '800', color: '#8b949e', textTransform: 'uppercase', marginBottom: '5px', marginLeft: '5px' };
 const closeBtnStyle = { position: 'absolute', top: '25px', right: '25px', background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: '20px' };
 const logoutBtnStyle = { background: 'rgba(248, 113, 113, 0.1)', color: '#f87171', border: 'none', padding: '8px 15px', borderRadius: '10px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', marginTop: '15px', width: '100%' };
-const riskCardStyle = { flex: 1, padding: '25px', borderRadius: '24px', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)', textAlign: 'center' };
+const riskCardStyle = { flex: 1, padding: '25px', borderRadius: '24px', textAlign: 'center' };
 const deleteBtnStyle = { background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: '16px', padding: '10px' };
-const tradeBtn = { padding: '8px 18px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '12px', fontSize: '12px', fontWeight: '800', cursor: 'pointer', transition: '0.2s' };
-const containerStyle = { padding: '60px 40px 60px 280px', fontFamily: "'Plus Jakarta Sans', sans-serif", minHeight: '100vh', transition: '0.3s' };
+const tradeBtn = { padding: '8px 18px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '12px', fontSize: '12px', fontWeight: '800', cursor: 'pointer' };
+const containerStyle = { padding: '60px 40px 60px 280px', fontFamily: "'Plus Jakarta Sans', sans-serif", minHeight: '100vh' };
 const watchlistSidebar = { position: 'fixed', left: 0, top: 0, bottom: 0, width: '240px', padding: '40px 25px', textAlign: 'left', zIndex: 100 };
 const watchlistItemWrapper = { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' };
-const watchlistItem = { padding: '14px', borderRadius: '14px', cursor: 'pointer', fontWeight: '800', fontSize: '13px', flex: 1, transition: '0.2s' };
+const watchlistItem = { padding: '14px', borderRadius: '14px', cursor: 'pointer', fontWeight: '800', fontSize: '13px', flex: 1 };
 const removeBtn = { background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', fontWeight: 'bold' };
 const inputStyle = { padding: '10px 20px', borderRadius: '15px', outline: 'none', border: '2px solid transparent', transition: '0.3s', fontSize: '14px', fontWeight: '600' };
-const mainBtn = { padding: '15px 35px', backgroundColor: '#38bdf8', color: 'white', border: 'none', borderRadius: '18px', fontWeight: '800', cursor: 'pointer', transition: '0.2s', letterSpacing: '0.5px' };
+const mainBtn = { padding: '15px 35px', backgroundColor: '#38bdf8', color: 'white', border: 'none', borderRadius: '18px', fontWeight: '800', cursor: 'pointer' };
 const modeTabContainer = { display: 'inline-flex', padding: '6px', borderRadius: '18px' };
-const activeTabStyle = { padding: '12px 24px', backgroundColor: '#ffffff', color: '#1a1d23', border: 'none', borderRadius: '14px', fontWeight: '800', cursor: 'pointer', boxShadow: '0 4px 6px rgba(0,0,0,0.05)' };
+const activeTabStyle = { padding: '12px 24px', backgroundColor: '#ffffff', color: '#1a1d23', border: 'none', borderRadius: '14px', fontWeight: '800', cursor: 'pointer' };
 const inactiveTabStyle = { padding: '12px 24px', backgroundColor: 'transparent', border: 'none', borderRadius: '14px', fontWeight: '700', cursor: 'pointer' };
-const cardStyle = { padding: '35px', borderRadius: '35px', width: '460px', textAlign: 'left', transition: '0.3s' };
+const cardStyle = { padding: '35px', borderRadius: '35px', width: '460px', textAlign: 'left' };
 const aiBox = { padding: '20px', borderRadius: '22px', marginTop: '15px', backgroundColor: 'rgba(100,116,139,0.05)' };
 const gridContainer = { display: 'flex', gap: '15px', marginTop: '25px' };
 const gridBox = { flex: 1, padding: '18px', borderRadius: '20px', textAlign: 'center' };
@@ -531,6 +502,6 @@ const badgeStyle = { padding: '8px 16px', borderRadius: '12px', fontSize: '11px'
 const themeToggleStyle = { width: '100%', padding: '14px', border: 'none', borderRadius: '14px', cursor: 'pointer', fontWeight: '800', background: 'linear-gradient(135deg, #1a1d23 0%, #38bdf8 100%)', color: 'white', fontSize: '12px' };
 const pdfBtnStyle = { width: '100%', padding: '14px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '14px', fontWeight: '800', cursor: 'pointer', fontSize: '12px' };
 const dropdownStyle = { position: 'absolute', top: '55px', width: '100%', zIndex: 1000, listStyle: 'none', padding: '10px', borderRadius: '20px' };
-const suggestionItem = { padding: '14px', cursor: 'pointer', borderRadius: '12px', transition: '0.2s' };
+const suggestionItem = { padding: '14px', cursor: 'pointer', borderRadius: '12px' };
 
 export default App;
