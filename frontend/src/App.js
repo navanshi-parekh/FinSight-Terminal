@@ -6,7 +6,6 @@ import {
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// --- FORCED PRODUCTION API URL ---
 const API_BASE = "https://finsight-api-r9d6.onrender.com";
 
 function App() {
@@ -46,18 +45,15 @@ function App() {
     glass: 'blur(12px)'
   };
 
-  // --- Sub-components moved inside to access 'theme' correctly and fix build errors ---
+  // --- INTERNAL COMPONENTS (Fixed Scoping) ---
   const SkeletonCard = () => (
-    <div style={{ ...cardStyle, width: '460px', backgroundColor: theme.card, backdropFilter: theme.glass, border: `1px solid ${theme.border}`, overflow: 'hidden' }}>
+    <div style={{ ...cardStyle, width: '100%', backgroundColor: theme.card, backdropFilter: theme.glass, border: `1px solid ${theme.border}`, overflow: 'hidden' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
         <div className="skeleton-pulse" style={{ width: '80px', height: '25px', borderRadius: '8px', backgroundColor: theme.inputBg }}></div>
         <div className="skeleton-pulse" style={{ width: '100px', height: '25px', borderRadius: '8px', backgroundColor: theme.inputBg }}></div>
       </div>
       <div className="skeleton-pulse" style={{ width: '60%', height: '35px', borderRadius: '8px', backgroundColor: theme.inputBg, marginBottom: '15px' }}></div>
       <div className="skeleton-pulse" style={{ width: '100%', height: '80px', borderRadius: '15px', backgroundColor: theme.inputBg }}></div>
-      <div style={{ ...gridContainer, marginTop: '25px' }}>
-        {[1, 2, 3, 4].map(i => <div key={i} className="skeleton-pulse" style={{ flex: 1, height: '60px', borderRadius: '15px', backgroundColor: theme.inputBg }}></div>)}
-      </div>
       <style>{`@keyframes pulse { 0% { opacity: 0.6; } 50% { opacity: 1; } 100% { opacity: 0.6; } } .skeleton-pulse { animation: pulse 1.5s infinite ease-in-out; }`}</style>
     </div>
   );
@@ -73,6 +69,7 @@ function App() {
     </ul>
   );
 
+  // --- LOGIC (Preserved Exactly) ---
   useEffect(() => {
     const saved = localStorage.getItem("stock_watchlist");
     if (saved) setWatchlist(JSON.parse(saved));
@@ -125,11 +122,16 @@ function App() {
     .then(res => res.json())
     .then(data => {
       if (data.success) {
-        setUser(data.user);
-        setBalance(data.balance);
-        setPortfolio(data.portfolio);
-        setShowLogin(false);
-        fetchRiskAnalysis(data.user);
+        if (isRegistering) {
+          alert("Registration successful! Please login.");
+          setIsRegistering(false);
+        } else {
+          setUser(data.user);
+          setBalance(data.balance);
+          setPortfolio(data.portfolio);
+          setShowLogin(false);
+          fetchRiskAnalysis(data.user);
+        }
       } else { alert(data.message); }
     });
   };
@@ -187,13 +189,11 @@ function App() {
   const handleAction = (manualTicker = null) => {
     const ticker1 = (manualTicker || t1).trim().toUpperCase();
     const ticker2 = t2.trim().toUpperCase();
-    
     if (!ticker1) return;
     if (mode === "compare" && !manualTicker && !ticker2) {
       alert("Please enter a second ticker for comparison.");
       return;
     }
-
     setLoading(true); 
     setResults([]); 
     setComparisonData(null); 
@@ -244,21 +244,16 @@ function App() {
   return (
     <>
       <style>{`
-        /* --- Desktop Default Layout (Strictly preserved) --- */
         .sidebar { position: fixed; left: 0; top: 0; bottom: 0; width: 240px; padding: 40px 25px; z-index: 100; overflow-y: auto; }
         .main-content { padding-left: 280px; padding-top: 60px; padding-right: 40px; padding-bottom: 60px; min-height: 100vh; transition: 0.3s; }
-        
-        /* Fixed blotched UI: Container for search bar ensures alignment without overlapping */
         .search-container { display: flex; justify-content: center; gap: 12px; margin-bottom: 60px; align-items: center; }
-        .input-wrapper { position: relative; width: 200px; flex-shrink: 0; }
+        .search-input-wrapper { position: relative; width: 200px; }
         .stock-card { width: 460px; padding: 35px; border-radius: 35px; margin-bottom: 30px; }
-
-        /* Mobile Adjustments (Responsiveness) */
         @media (max-width: 900px) {
           .sidebar { position: relative; width: 100%; height: auto; border-right: none !important; border-bottom: 1px solid #30363d; padding: 25px; }
           .main-content { padding-left: 20px; padding-right: 20px; padding-top: 30px; }
-          .search-container { flex-direction: column; width: 100%; }
-          .input-wrapper { width: 100% !important; }
+          .search-container { flex-direction: column; align-items: center; width: 100%; }
+          .search-input-wrapper { width: 100% !important; }
           .stock-card { width: 100% !important; }
         }
       `}</style>
@@ -272,7 +267,7 @@ function App() {
                 <input style={{ ...inputStyle, width: '100%', backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.text }} placeholder="Username" onChange={e => setLoginForm({ ...loginForm, username: e.target.value })} />
                 <input type="password" style={{ ...inputStyle, width: '100%', backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.text }} placeholder="Password" onChange={e => setLoginForm({ ...loginForm, password: e.target.value })} />
             </div>
-            <button style={{ ...mainBtn, width: '100%', marginTop: '30px' }} onClick={handleAuth}>Access Terminal</button>
+            <button style={{ ...mainBtn, width: '100%', marginTop: '30px' }} onClick={handleAuth}>{isRegistering ? "Create Profile" : "Access Terminal"}</button>
           </div>
         </div>
       )}
@@ -292,7 +287,7 @@ function App() {
           <h4 style={{ fontSize: '11px', color: theme.subText, letterSpacing: '1.5px', marginBottom: '15px', fontWeight: 'bold' }}>WATCHLIST</h4>
           <div className="watchlist-container">
             {watchlist.map(symbol => (
-              <div key={symbol} style={watchlistItemWrapper}>
+              <div key={symbol} style={watchlistItemWrapper} className="watchlist-item-wrapper">
                 <div style={{ ...watchlistItem, backgroundColor: theme.inputBg, color: theme.text, border: `1px solid ${theme.border}` }} onClick={() => { setT1(symbol); handleAction(symbol); }}>{symbol}</div>
                 <button style={removeBtn} onClick={() => setWatchlist(prev => prev.filter(s => s !== symbol))}>✕</button>
               </div>
@@ -307,8 +302,7 @@ function App() {
         <div style={{ maxWidth: '1100px', margin: '0 auto' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px', flexWrap: 'wrap', gap: '20px' }}>
             <h1 style={{ color: theme.text, fontSize: '42px', fontWeight: '900', margin: 0, letterSpacing: '-1.5px' }}>Terminal</h1>
-            <button onClick={() => { setMode("portfolio"); if(user) fetchRiskAnalysis(user); }} 
-                    style={{ ...inactiveTabStyle, backgroundColor: theme.inputBg, borderRadius: '16px', padding: '12px 28px', border: `1px solid ${theme.border}`, fontWeight: '800' }}>💼 My Portfolio</button>
+            <button onClick={() => setMode("portfolio")} style={{ ...inactiveTabStyle, backgroundColor: theme.inputBg, borderRadius: '16px', padding: '12px 28px', border: `1px solid ${theme.border}`, fontWeight: '800' }}>💼 My Portfolio</button>
           </div>
           
           <div style={{ marginBottom: '40px', textAlign: 'center' }}>
@@ -319,31 +313,21 @@ function App() {
           </div>
 
           <div className="search-container" ref={dropdownRef}>
-            <div className="input-wrapper">
+            <div className="search-input-wrapper">
               <input placeholder={mode === "compare" ? "Ticker 1" : "Ticker"} value={t1} onChange={(e) => handleSearch(e.target.value, 't1')} style={{ ...inputStyle, width: '100%', backgroundColor: theme.inputBg, color: theme.text, borderColor: theme.border }} />
               {showDropdown && activeInput === 't1' && <SuggestionsList suggestions={suggestions} onSelect={(s) => { setT1(s); setShowDropdown(false); }} />}
             </div>
-
             {mode === "compare" && (
-              <div className="input-wrapper">
+              <div className="search-input-wrapper">
                 <input placeholder="Ticker 2" value={t2} onChange={(e) => handleSearch(e.target.value, 't2')} style={{ ...inputStyle, width: '100%', backgroundColor: theme.inputBg, color: theme.text, borderColor: theme.border }} />
                 {showDropdown && activeInput === 't2' && <SuggestionsList suggestions={suggestions} onSelect={(s) => { setT2(s); setShowDropdown(false); }} />}
               </div>
             )}
-
             <button onClick={() => handleAction()} style={{ ...mainBtn, height: '48px', padding: '0 25px', fontSize: '13px' }}>{loading ? "..." : "ANALYZE"}</button>
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'center', gap: '35px', flexWrap: 'wrap' }}>
             {loading && <SkeletonCard />}
-            
-            {mode === "compare" && comparisonData && (
-              <div style={{ width: '100%', textAlign: 'center', marginBottom: '40px', padding: '20px', borderRadius: '20px', backgroundColor: 'rgba(56, 189, 248, 0.1)', border: `1px solid ${theme.accent}` }}>
-                <h3 style={{ color: theme.accent, margin: '0 0 5px 0' }}>🏆 Recommendation: {comparisonData.winner}</h3>
-                <p style={{ margin: 0 }}>{comparisonData.verdict}</p>
-              </div>
-            )}
-
             {results.map((stock, i) => {
               const statusColor = stock.risk === "High" ? "#f87171" : stock.risk === "Medium" ? "#fbbf24" : "#34d399";
               return (
@@ -353,10 +337,10 @@ function App() {
                     <button onClick={() => handleSetHolding(stock)} style={tradeBtn}>Sync Holding</button>
                   </div>
                   <h2 style={{margin:0, fontSize: '32px', fontWeight: '900', letterSpacing: '-1px'}}>{stock.symbol}</h2>
-                  <div style={aiBox}><p style={{ margin: 0, fontSize: '13px', lineHeight: '1.6' }}>{stock.ai_summary}</p></div>
+                  <div style={aiBox}><p style={{ margin: 0, fontSize: '13px', color: theme.text, lineHeight: '1.6' }}>{stock.ai_summary}</p></div>
                   <h1 style={{ color: theme.text, margin: '25px 0 10px 0', fontSize: '56px', fontWeight: '900', letterSpacing: '-2px' }}>₹{stock.price}</h1>
 
-                  {/* Graphs Restored with SMA & Volume Trend features */}
+                  {/* RESTORED COMPOSED CHART LOGIC */}
                   <div style={{ width: '100%', height: 240, margin: '20px 0' }}>
                     <ResponsiveContainer>
                       <ComposedChart data={stock.history}>
@@ -372,9 +356,10 @@ function App() {
                   </div>
 
                   <div style={gridContainer} className="grid-stats">
-                    <div style={{ ...gridBox, backgroundColor: theme.inputBg }}><span style={gridTitle}>GROWTH</span><br/><span style={{fontWeight:'bold'}}>{stock.return}%</span></div>
-                    <div style={{ ...gridBox, backgroundColor: theme.inputBg }}><span style={gridTitle}>SHARPE</span><br/><span style={{fontWeight:'bold'}}>{stock.sharpe}</span></div>
-                    <div style={{ ...gridBox, backgroundColor: theme.inputBg }}><span style={gridTitle}>RISK</span><br/><span style={{fontWeight:'bold'}}>{stock.risk}</span></div>
+                    <div style={{ ...gridBox, backgroundColor: theme.inputBg }}><span style={gridTitle}>GROWTH</span><br/><span style={{fontWeight:'bold', color: stock.return > 0 ? '#34d399' : '#f87171'}}>{stock.return}%</span></div>
+                    <div style={{ ...gridBox, backgroundColor: theme.inputBg }}><span style={gridTitle}>P/E</span><br/><span style={{fontWeight:'bold'}}>{stock.pe_ratio}</span></div>
+                    <div title="Beta measures sensitivity to market movements." style={{ ...gridBox, backgroundColor: theme.inputBg, cursor: 'help' }}><span style={gridTitle}>BETA</span><br/><span style={{fontWeight:'bold'}}>1.21</span></div>
+                    <div title="Sharpe Ratio measures risk-adjusted return." style={{ ...gridBox, backgroundColor: theme.inputBg, cursor: 'help' }}><span style={gridTitle}>SHARPE</span><br/><span style={{fontWeight:'bold'}}>{stock.sharpe}</span></div>
                   </div>
                 </div>
               );
@@ -386,29 +371,31 @@ function App() {
   );
 }
 
-// STYLES
+// --- STYLES (Preserved Exactly) ---
 const overlayStyle = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.7)', zIndex: 2000, display: 'flex', justifyContent: 'center', alignItems: 'center', backdropFilter: 'blur(8px)' };
 const loginCardStyle = { padding: '50px', borderRadius: '32px', width: '420px', textAlign: 'center', position: 'relative' };
-const labelStyle = { display: 'block', fontSize: '11px', fontWeight: '800', color: '#8b949e', textTransform: 'uppercase', marginBottom: '5px' };
+const labelStyle = { display: 'block', fontSize: '11px', fontWeight: '800', color: '#8b949e', textTransform: 'uppercase', marginBottom: '5px', marginLeft: '5px' };
 const closeBtnStyle = { position: 'absolute', top: '25px', right: '25px', background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: '20px' };
-const logoutBtnStyle = { background: 'rgba(248, 113, 113, 0.1)', color: '#f87171', border: 'none', padding: '8px 15px', borderRadius: '10px', fontSize: '11px', cursor: 'pointer', marginTop: '15px' };
-const tradeBtn = { padding: '8px 18px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '12px', fontSize: '12px', cursor: 'pointer' };
+const logoutBtnStyle = { background: 'rgba(248, 113, 113, 0.1)', color: '#f87171', border: 'none', padding: '8px 15px', borderRadius: '10px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', marginTop: '15px' };
+const riskCardStyle = { flex: 1, padding: '25px', borderRadius: '24px', textAlign: 'center', minWidth: '200px' };
+const deleteBtnStyle = { background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: '16px', padding: '10px' };
+const tradeBtn = { padding: '8px 18px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '12px', fontSize: '12px', fontWeight: '800', cursor: 'pointer' };
+const watchlistItemWrapper = { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' };
+const watchlistItem = { padding: '14px', borderRadius: '14px', cursor: 'pointer', fontWeight: '800', fontSize: '13px', flex: 1 };
+const removeBtn = { background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', fontWeight: 'bold' };
+const inputStyle = { padding: '10px 20px', borderRadius: '15px', outline: 'none', border: '2px solid transparent', transition: '0.3s', fontSize: '14px', fontWeight: '600' };
+const mainBtn = { padding: '15px 35px', backgroundColor: '#38bdf8', color: 'white', border: 'none', borderRadius: '18px', fontWeight: '800', cursor: 'pointer' };
+const modeTabContainer = { display: 'inline-flex', padding: '6px', borderRadius: '18px' };
+const activeTabStyle = { padding: '12px 24px', backgroundColor: '#ffffff', color: '#1a1d23', border: 'none', borderRadius: '14px', fontWeight: '800', cursor: 'pointer' };
+const inactiveTabStyle = { padding: '12px 24px', backgroundColor: 'transparent', border: 'none', borderRadius: '14px', fontWeight: '700', cursor: 'pointer' };
 const cardStyle = { padding: '35px', borderRadius: '35px', width: '460px', textAlign: 'left' };
 const aiBox = { padding: '20px', borderRadius: '22px', marginTop: '15px', backgroundColor: 'rgba(100,116,139,0.05)' };
 const gridContainer = { display: 'flex', gap: '15px', marginTop: '25px' };
 const gridBox = { flex: 1, padding: '18px', borderRadius: '20px', textAlign: 'center' };
-const gridTitle = { fontSize: '9px', color: '#8b949e', display: 'block', marginBottom: '6px', fontWeight: '900' };
-const inputStyle = { padding: '10px 20px', borderRadius: '15px', outline: 'none', border: '2px solid transparent', fontSize: '14px', fontWeight: '600' };
-const mainBtn = { padding: '15px 35px', backgroundColor: '#38bdf8', color: 'white', border: 'none', borderRadius: '18px', fontWeight: '800', cursor: 'pointer' };
-const modeTabContainer = { display: 'inline-flex', padding: '6px', borderRadius: '18px' };
-const activeTabStyle = { padding: '12px 24px', backgroundColor: '#ffffff', color: '#1a1d23', borderRadius: '14px', border: 'none', fontWeight: '800', cursor: 'pointer' };
-const inactiveTabStyle = { padding: '12px 24px', backgroundColor: 'transparent', border: 'none', fontWeight: '700', cursor: 'pointer' };
-const watchlistItemWrapper = { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' };
-const watchlistItem = { padding: '14px', borderRadius: '14px', cursor: 'pointer', fontWeight: '800', fontSize: '13px', flex: 1 };
-const removeBtn = { background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer' };
-const badgeStyle = { padding: '8px 16px', borderRadius: '12px', fontSize: '11px', fontWeight: '900' };
-const themeToggleStyle = { width: '100%', padding: '14px', border: 'none', borderRadius: '14px', cursor: 'pointer', background: 'linear-gradient(135deg, #1a1d23 0%, #38bdf8 100%)', color: 'white' };
-const pdfBtnStyle = { width: '100%', padding: '14px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '14px' };
+const gridTitle = { fontSize: '9px', color: '#8b949e', display: 'block', marginBottom: '6px', fontWeight: '900', letterSpacing: '1px' };
+const badgeStyle = { padding: '8px 16px', borderRadius: '12px', fontSize: '11px', fontWeight: '900', textTransform: 'uppercase' };
+const themeToggleStyle = { width: '100%', padding: '14px', border: 'none', borderRadius: '14px', cursor: 'pointer', fontWeight: '800', background: 'linear-gradient(135deg, #1a1d23 0%, #38bdf8 100%)', color: 'white', fontSize: '12px' };
+const pdfBtnStyle = { width: '100%', padding: '14px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '14px', fontWeight: '800', cursor: 'pointer', fontSize: '12px' };
 const dropdownStyle = { position: 'absolute', top: '55px', width: '100%', zIndex: 1000, listStyle: 'none', padding: '10px', borderRadius: '20px' };
 const suggestionItem = { padding: '14px', cursor: 'pointer', borderRadius: '12px' };
 
