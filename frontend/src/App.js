@@ -6,6 +6,7 @@ import {
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
+// --- FORCED PRODUCTION API URL ---
 const API_BASE = "https://finsight-api-r9d6.onrender.com";
 
 function App() {
@@ -45,16 +46,23 @@ function App() {
     glass: 'blur(12px)'
   };
 
-  // --- INTERNAL COMPONENTS (Fixed Scoping) ---
+  // Components moved inside to ensure 'theme' is defined
   const SkeletonCard = () => (
-    <div style={{ ...cardStyle, width: '100%', backgroundColor: theme.card, backdropFilter: theme.glass, border: `1px solid ${theme.border}`, overflow: 'hidden' }}>
+    <div style={{ ...cardStyle, backgroundColor: theme.card, backdropFilter: theme.glass, border: `1px solid ${theme.border}`, overflow: 'hidden' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
         <div className="skeleton-pulse" style={{ width: '80px', height: '25px', borderRadius: '8px', backgroundColor: theme.inputBg }}></div>
         <div className="skeleton-pulse" style={{ width: '100px', height: '25px', borderRadius: '8px', backgroundColor: theme.inputBg }}></div>
       </div>
       <div className="skeleton-pulse" style={{ width: '60%', height: '35px', borderRadius: '8px', backgroundColor: theme.inputBg, marginBottom: '15px' }}></div>
       <div className="skeleton-pulse" style={{ width: '100%', height: '80px', borderRadius: '15px', backgroundColor: theme.inputBg }}></div>
-      <style>{`@keyframes pulse { 0% { opacity: 0.6; } 50% { opacity: 1; } 100% { opacity: 0.6; } } .skeleton-pulse { animation: pulse 1.5s infinite ease-in-out; }`}</style>
+      <div className="skeleton-pulse" style={{ width: '40%', height: '50px', borderRadius: '8px', backgroundColor: theme.inputBg, marginTop: '25px' }}></div>
+      <div style={{ ...gridContainer, marginTop: '25px' }}>
+        {[1, 2, 3, 4].map(i => <div key={i} className="skeleton-pulse" style={{ flex: 1, height: '60px', borderRadius: '15px', backgroundColor: theme.inputBg }}></div>)}
+      </div>
+      <style>{`
+        @keyframes pulse { 0% { opacity: 0.6; } 50% { opacity: 1; } 100% { opacity: 0.6; } }
+        .skeleton-pulse { animation: pulse 1.5s infinite ease-in-out; }
+      `}</style>
     </div>
   );
 
@@ -69,7 +77,6 @@ function App() {
     </ul>
   );
 
-  // --- LOGIC (Preserved Exactly) ---
   useEffect(() => {
     const saved = localStorage.getItem("stock_watchlist");
     if (saved) setWatchlist(JSON.parse(saved));
@@ -189,14 +196,11 @@ function App() {
   const handleAction = (manualTicker = null) => {
     const ticker1 = (manualTicker || t1).trim().toUpperCase();
     const ticker2 = t2.trim().toUpperCase();
+    
     if (!ticker1) return;
-    if (mode === "compare" && !manualTicker && !ticker2) {
-      alert("Please enter a second ticker for comparison.");
-      return;
-    }
+
     setLoading(true); 
     setResults([]); 
-    setComparisonData(null); 
     setShowDropdown(false);
 
     const url = (mode === "analyze" || manualTicker)
@@ -205,20 +209,18 @@ function App() {
 
     fetch(url)
       .then(res => {
-        if (res.status === 429) {
-          alert("Rate limited by Yahoo Finance. Please wait 10 minutes.");
-          throw new Error("Rate limit");
-        }
+        if (!res.ok) throw new Error("Server response failed");
         return res.json();
       })
       .then(data => {
-        if (data.stocks) {
+        console.log("Data received:", data);
+        if (data.error) {
+          alert("Error: " + data.error);
+        } else if (data.stocks) {
           setResults(data.stocks);
           setComparisonData({ winner: data.winner, verdict: data.verdict });
-        } else if (data.symbol) {
-          setResults([data]); 
         } else {
-          setResults([]);
+          setResults([data]);
         }
         setLoading(false);
       })
@@ -246,13 +248,17 @@ function App() {
       <style>{`
         .sidebar { position: fixed; left: 0; top: 0; bottom: 0; width: 240px; padding: 40px 25px; z-index: 100; overflow-y: auto; }
         .main-content { padding-left: 280px; padding-top: 60px; padding-right: 40px; padding-bottom: 60px; min-height: 100vh; transition: 0.3s; }
+        
+        /* Fixed Blotched UI: Flex container ensures side-by-side desktop layout */
         .search-container { display: flex; justify-content: center; gap: 12px; margin-bottom: 60px; align-items: center; }
-        .search-input-wrapper { position: relative; width: 200px; }
+        .search-input-wrapper { position: relative; width: 200px; flex-shrink: 0; }
+        
         .stock-card { width: 460px; padding: 35px; border-radius: 35px; margin-bottom: 30px; }
+
         @media (max-width: 900px) {
           .sidebar { position: relative; width: 100%; height: auto; border-right: none !important; border-bottom: 1px solid #30363d; padding: 25px; }
           .main-content { padding-left: 20px; padding-right: 20px; padding-top: 30px; }
-          .search-container { flex-direction: column; align-items: center; width: 100%; }
+          .search-container { flex-direction: column; width: 100%; }
           .search-input-wrapper { width: 100% !important; }
           .stock-card { width: 100% !important; }
         }
@@ -279,15 +285,15 @@ function App() {
             <div style={{ margin: '20px 0', padding: '20px', backgroundColor: theme.inputBg, borderRadius: '18px', border: `1px solid ${theme.border}` }}>
               <div style={{ fontSize: '10px', color: theme.subText, fontWeight: 'bold' }}>NET WORTH</div>
               <div style={{ fontSize: '20px', fontWeight: '800', color: theme.accent }}>₹{balance.toLocaleString()}</div>
-              <button onClick={() => { setUser(null); }} style={logoutBtnStyle}>Sign Out</button>
+              <button onClick={() => { setUser(null); setMode("analyze"); }} style={logoutBtnStyle}>Sign Out</button>
             </div>
           ) : (
             <button onClick={() => setShowLogin(true)} style={{ ...mainBtn, padding: '12px', fontSize: '12px', width: '100%', margin: '25px 0' }}>🔑 Member Login</button>
           )}
           <h4 style={{ fontSize: '11px', color: theme.subText, letterSpacing: '1.5px', marginBottom: '15px', fontWeight: 'bold' }}>WATCHLIST</h4>
-          <div className="watchlist-container">
+          <div style={{ maxHeight: 'calc(100vh - 400px)', overflowY: 'auto' }}>
             {watchlist.map(symbol => (
-              <div key={symbol} style={watchlistItemWrapper} className="watchlist-item-wrapper">
+              <div key={symbol} style={watchlistItemWrapper}>
                 <div style={{ ...watchlistItem, backgroundColor: theme.inputBg, color: theme.text, border: `1px solid ${theme.border}` }} onClick={() => { setT1(symbol); handleAction(symbol); }}>{symbol}</div>
                 <button style={removeBtn} onClick={() => setWatchlist(prev => prev.filter(s => s !== symbol))}>✕</button>
               </div>
@@ -302,7 +308,11 @@ function App() {
         <div style={{ maxWidth: '1100px', margin: '0 auto' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px', flexWrap: 'wrap', gap: '20px' }}>
             <h1 style={{ color: theme.text, fontSize: '42px', fontWeight: '900', margin: 0, letterSpacing: '-1.5px' }}>Terminal</h1>
-            <button onClick={() => setMode("portfolio")} style={{ ...inactiveTabStyle, backgroundColor: theme.inputBg, borderRadius: '16px', padding: '12px 28px', border: `1px solid ${theme.border}`, fontWeight: '800' }}>💼 My Portfolio</button>
+            <button onClick={() => { setMode("portfolio"); if(user) fetchRiskAnalysis(user); }} 
+                    style={{ ...mode === "portfolio" ? activeTabStyle : inactiveTabStyle, 
+                    backgroundColor: mode === "portfolio" ? theme.accent : 'rgba(100,116,139,0.05)', 
+                    color: mode === "portfolio" ? '#fff' : theme.text, borderRadius: '16px', padding: '12px 28px', border: `1px solid ${theme.border}`,
+                    fontWeight: '800', cursor: 'pointer' }}>💼 My Portfolio</button>
           </div>
           
           <div style={{ marginBottom: '40px', textAlign: 'center' }}>
@@ -314,20 +324,30 @@ function App() {
 
           <div className="search-container" ref={dropdownRef}>
             <div className="search-input-wrapper">
-              <input placeholder={mode === "compare" ? "Ticker 1" : "Ticker"} value={t1} onChange={(e) => handleSearch(e.target.value, 't1')} style={{ ...inputStyle, width: '100%', backgroundColor: theme.inputBg, color: theme.text, borderColor: theme.border }} />
+              <input placeholder={mode === "compare" ? "Ticker 1" : "Ticker"} value={t1} onChange={(e) => handleSearch(e.target.value, 't1')} style={{ ...inputStyle, width: '100%', height: '48px', backgroundColor: theme.inputBg, color: theme.text, borderColor: theme.border }} />
               {showDropdown && activeInput === 't1' && <SuggestionsList suggestions={suggestions} onSelect={(s) => { setT1(s); setShowDropdown(false); }} />}
             </div>
+
             {mode === "compare" && (
               <div className="search-input-wrapper">
-                <input placeholder="Ticker 2" value={t2} onChange={(e) => handleSearch(e.target.value, 't2')} style={{ ...inputStyle, width: '100%', backgroundColor: theme.inputBg, color: theme.text, borderColor: theme.border }} />
+                <input placeholder="Ticker 2" value={t2} onChange={(e) => handleSearch(e.target.value, 't2')} style={{ ...inputStyle, width: '100%', height: '48px', backgroundColor: theme.inputBg, color: theme.text, borderColor: theme.border }} />
                 {showDropdown && activeInput === 't2' && <SuggestionsList suggestions={suggestions} onSelect={(s) => { setT2(s); setShowDropdown(false); }} />}
               </div>
             )}
+
             <button onClick={() => handleAction()} style={{ ...mainBtn, height: '48px', padding: '0 25px', fontSize: '13px' }}>{loading ? "..." : "ANALYZE"}</button>
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'center', gap: '35px', flexWrap: 'wrap' }}>
             {loading && <SkeletonCard />}
+
+            {mode === "compare" && comparisonData && (
+              <div style={{ width: '100%', textAlign: 'center', marginBottom: '40px', padding: '20px', borderRadius: '20px', backgroundColor: 'rgba(56, 189, 248, 0.1)', border: `1px solid ${theme.accent}` }}>
+                <h3 style={{ color: theme.accent, margin: '0 0 5px 0', fontSize: '20px' }}>🏆 Recommendation: {comparisonData.winner}</h3>
+                <p style={{ margin: 0, fontSize: '14px', color: theme.text }}>{comparisonData.verdict}</p>
+              </div>
+            )}
+
             {results.map((stock, i) => {
               const statusColor = stock.risk === "High" ? "#f87171" : stock.risk === "Medium" ? "#fbbf24" : "#34d399";
               return (
@@ -337,10 +357,10 @@ function App() {
                     <button onClick={() => handleSetHolding(stock)} style={tradeBtn}>Sync Holding</button>
                   </div>
                   <h2 style={{margin:0, fontSize: '32px', fontWeight: '900', letterSpacing: '-1px'}}>{stock.symbol}</h2>
-                  <div style={aiBox}><p style={{ margin: 0, fontSize: '13px', color: theme.text, lineHeight: '1.6' }}>{stock.ai_summary}</p></div>
+                  <div style={aiBox}><p style={{ margin: 0, fontSize: '13px', lineHeight: '1.6' }}>{stock.ai_summary}</p></div>
                   <h1 style={{ color: theme.text, margin: '25px 0 10px 0', fontSize: '56px', fontWeight: '900', letterSpacing: '-2px' }}>₹{stock.price}</h1>
 
-                  {/* RESTORED COMPOSED CHART LOGIC */}
+                  {/* Restored Chart with all original features */}
                   <div style={{ width: '100%', height: 240, margin: '20px 0' }}>
                     <ResponsiveContainer>
                       <ComposedChart data={stock.history}>
@@ -371,7 +391,7 @@ function App() {
   );
 }
 
-// --- STYLES (Preserved Exactly) ---
+// --- STYLES PRESERVED ---
 const overlayStyle = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.7)', zIndex: 2000, display: 'flex', justifyContent: 'center', alignItems: 'center', backdropFilter: 'blur(8px)' };
 const loginCardStyle = { padding: '50px', borderRadius: '32px', width: '420px', textAlign: 'center', position: 'relative' };
 const labelStyle = { display: 'block', fontSize: '11px', fontWeight: '800', color: '#8b949e', textTransform: 'uppercase', marginBottom: '5px', marginLeft: '5px' };
@@ -380,6 +400,8 @@ const logoutBtnStyle = { background: 'rgba(248, 113, 113, 0.1)', color: '#f87171
 const riskCardStyle = { flex: 1, padding: '25px', borderRadius: '24px', textAlign: 'center', minWidth: '200px' };
 const deleteBtnStyle = { background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: '16px', padding: '10px' };
 const tradeBtn = { padding: '8px 18px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '12px', fontSize: '12px', fontWeight: '800', cursor: 'pointer' };
+const containerStyle = { fontFamily: "'Plus Jakarta Sans', sans-serif", minHeight: '100vh', transition: '0.3s' };
+const watchlistSidebar = { position: 'fixed', left: 0, top: 0, bottom: 0, width: '240px', padding: '40px 25px', textAlign: 'left', zIndex: 100 };
 const watchlistItemWrapper = { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' };
 const watchlistItem = { padding: '14px', borderRadius: '14px', cursor: 'pointer', fontWeight: '800', fontSize: '13px', flex: 1 };
 const removeBtn = { background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', fontWeight: 'bold' };
