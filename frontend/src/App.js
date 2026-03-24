@@ -9,16 +9,28 @@ import autoTable from 'jspdf-autotable';
 // --- FORCED PRODUCTION API URL ---
 const API_BASE = "https://finsight-api-r9d6.onrender.com";
 
-const SkeletonCard = ({ theme }) => (
-  <div style={{ ...cardStyle, width: '100%', backgroundColor: theme.card, backdropFilter: theme.glass, border: `1px solid ${theme.border}`, overflow: 'hidden' }}>
+// --- Components moved inside or modified to accept theme prop to prevent 'theme not defined' crash ---
+const SkeletonCard = ({ currentTheme, cardStyle, gridContainer }) => (
+  <div style={{ ...cardStyle, width: '100%', backgroundColor: currentTheme.card, backdropFilter: currentTheme.glass, border: `1px solid ${currentTheme.border}`, overflow: 'hidden' }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
-      <div className="skeleton-pulse" style={{ width: '80px', height: '25px', borderRadius: '8px', backgroundColor: theme.inputBg }}></div>
-      <div className="skeleton-pulse" style={{ width: '100px', height: '25px', borderRadius: '8px', backgroundColor: theme.inputBg }}></div>
+      <div className="skeleton-pulse" style={{ width: '80px', height: '25px', borderRadius: '8px', backgroundColor: currentTheme.inputBg }}></div>
+      <div className="skeleton-pulse" style={{ width: '100px', height: '25px', borderRadius: '8px', backgroundColor: currentTheme.inputBg }}></div>
     </div>
-    <div className="skeleton-pulse" style={{ width: '60%', height: '35px', borderRadius: '8px', backgroundColor: theme.inputBg, marginBottom: '15px' }}></div>
-    <div className="skeleton-pulse" style={{ width: '100%', height: '80px', borderRadius: '15px', backgroundColor: theme.inputBg }}></div>
+    <div className="skeleton-pulse" style={{ width: '60%', height: '35px', borderRadius: '8px', backgroundColor: currentTheme.inputBg, marginBottom: '15px' }}></div>
+    <div className="skeleton-pulse" style={{ width: '100%', height: '80px', borderRadius: '15px', backgroundColor: currentTheme.inputBg }}></div>
     <style>{`@keyframes pulse { 0% { opacity: 0.6; } 50% { opacity: 1; } 100% { opacity: 0.6; } } .skeleton-pulse { animation: pulse 1.5s infinite ease-in-out; }`}</style>
   </div>
+);
+
+const SuggestionsList = ({ suggestions, onSelect, currentTheme, dropdownStyle, suggestionItem }) => (
+  <ul style={{ ...dropdownStyle, backgroundColor: currentTheme.card, border: `1px solid ${currentTheme.border}`, backdropFilter: 'blur(10px)' }}>
+    {suggestions.map((s, idx) => (
+      <li key={idx} onClick={() => onSelect(s.symbol)} style={{ ...suggestionItem, color: currentTheme.text, borderBottom: `1px solid ${currentTheme.border}` }}>
+        <div style={{ fontWeight: 'bold', fontSize: '14px' }}>{s.symbol}</div>
+        <div style={{ fontSize: '11px', color: currentTheme.subText }}>{s.name}</div>
+      </li>
+    ))}
+  </ul>
 );
 
 function App() {
@@ -304,7 +316,7 @@ function App() {
           <div className="watchlist-container">
             {watchlist.map(symbol => (
               <div key={symbol} style={watchlistItemWrapper} className="watchlist-item-wrapper">
-                <div style={{ ...watchlistItem, backgroundColor: theme.inputBg, color: theme.text, border: `1px solid ${theme.border}` }} onClick={() => { setT1(symbol); setMode("analyze"); handleAction(symbol); }}>{symbol}</div>
+                <div style={{ ...watchlistItem, backgroundColor: theme.inputBg, color: theme.text, border: `1px solid ${theme.border}` }} onClick={() => { setT1(symbol); handleAction(symbol); }}>{symbol}</div>
                 <button style={removeBtn} onClick={() => setWatchlist(prev => prev.filter(s => s !== symbol))}>✕</button>
               </div>
             ))}
@@ -337,13 +349,13 @@ function App() {
               <div className="search-container" ref={dropdownRef}>
                 <div style={{ position: 'relative', width: '200px' }} className="search-input-wrapper">
                   <input placeholder={mode === "compare" ? "Ticker 1" : "Ticker"} value={t1} onChange={(e) => handleSearch(e.target.value, 't1')} style={{ ...inputStyle, width: '100%', height: '48px', backgroundColor: theme.inputBg, color: theme.text, borderColor: theme.border }} />
-                  {showDropdown && activeInput === 't1' && <SuggestionsList suggestions={suggestions} onSelect={(s) => { setT1(s); setShowDropdown(false); }} theme={theme} />}
+                  {showDropdown && activeInput === 't1' && <SuggestionsList suggestions={suggestions} onSelect={(s) => { setT1(s); setShowDropdown(false); }} currentTheme={theme} dropdownStyle={dropdownStyle} suggestionItem={suggestionItem} />}
                 </div>
 
                 {mode === "compare" && (
                   <div style={{ position: 'relative', width: '200px' }} className="search-input-wrapper">
                     <input placeholder="Ticker 2" value={t2} onChange={(e) => handleSearch(e.target.value, 't2')} style={{ ...inputStyle, width: '100%', height: '48px', backgroundColor: theme.inputBg, color: theme.text, borderColor: theme.border }} />
-                    {showDropdown && activeInput === 't2' && <SuggestionsList suggestions={suggestions} onSelect={(s) => { setT2(s); setShowDropdown(false); }} theme={theme} />}
+                    {showDropdown && activeInput === 't2' && <SuggestionsList suggestions={suggestions} onSelect={(s) => { setT2(s); setShowDropdown(false); }} currentTheme={theme} dropdownStyle={dropdownStyle} suggestionItem={suggestionItem} />}
                   </div>
                 )}
 
@@ -351,7 +363,7 @@ function App() {
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'center', gap: '35px', flexWrap: 'wrap' }}>
-                {loading && <SkeletonCard theme={theme} />}
+                {loading && <SkeletonCard currentTheme={theme} cardStyle={cardStyle} gridContainer={gridContainer} />}
 
                 {mode === "compare" && comparisonData && (
                   <div style={{ width: '100%', textAlign: 'center', marginBottom: '40px', padding: '20px', borderRadius: '20px', backgroundColor: 'rgba(56, 189, 248, 0.1)', border: `1px solid ${theme.accent}` }}>
@@ -481,18 +493,7 @@ function App() {
   );
 }
 
-const SuggestionsList = ({ suggestions, onSelect, theme }) => (
-  <ul style={{ ...dropdownStyle, backgroundColor: theme.card, border: `1px solid ${theme.border}`, backdropFilter: 'blur(10px)' }}>
-    {suggestions.map((s, idx) => (
-      <li key={idx} onClick={() => onSelect(s.symbol)} style={{ ...suggestionItem, color: theme.text, borderBottom: `1px solid ${theme.border}` }}>
-        <div style={{ fontWeight: 'bold', fontSize: '14px' }}>{s.symbol}</div>
-        <div style={{ fontSize: '11px', color: theme.subText }}>{s.name}</div>
-      </li>
-    ))}
-  </ul>
-);
-
-// REVISED STYLES (HARD PIXELS REPLACED WITH FLEX)
+// STYLES
 const overlayStyle = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.7)', zIndex: 2000, display: 'flex', justifyContent: 'center', alignItems: 'center', backdropFilter: 'blur(8px)' };
 const loginCardStyle = { padding: '50px', borderRadius: '32px', width: '420px', maxWidth: '90%', textAlign: 'center', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)', position: 'relative' };
 const labelStyle = { display: 'block', fontSize: '11px', fontWeight: '800', color: '#8b949e', textTransform: 'uppercase', marginBottom: '5px', marginLeft: '5px' };
@@ -501,8 +502,8 @@ const logoutBtnStyle = { background: 'rgba(248, 113, 113, 0.1)', color: '#f87171
 const riskCardStyle = { flex: 1, padding: '25px', borderRadius: '24px', textAlign: 'center', minWidth: '200px' };
 const deleteBtnStyle = { background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: '16px', padding: '10px' };
 const tradeBtn = { padding: '8px 18px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '12px', fontSize: '12px', fontWeight: '800', cursor: 'pointer' };
-const containerStyle = { fontFamily: "'Plus Jakarta Sans', sans-serif", minHeight: '100vh', transition: '0.3s' };
-const watchlistSidebar = { width: '240px', padding: '40px 25px', textAlign: 'left', zIndex: 100, overflowY: 'auto' };
+const containerStyle = { padding: '60px 40px 60px 280px', fontFamily: "'Plus Jakarta Sans', sans-serif", minHeight: '100vh', transition: '0.3s' };
+const watchlistSidebar = { position: 'fixed', left: 0, top: 0, bottom: 0, width: '240px', padding: '40px 25px', textAlign: 'left', zIndex: 100, overflowY: 'auto' };
 const watchlistItemWrapper = { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px', flexShrink: 0 };
 const watchlistItem = { padding: '14px', borderRadius: '14px', cursor: 'pointer', fontWeight: '800', fontSize: '13px', flex: 1 };
 const removeBtn = { background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', fontWeight: 'bold' };
@@ -511,7 +512,7 @@ const mainBtn = { padding: '15px 35px', backgroundColor: '#38bdf8', color: 'whit
 const modeTabContainer = { display: 'inline-flex', padding: '6px', borderRadius: '18px', flexWrap: 'wrap', justifyContent: 'center' };
 const activeTabStyle = { padding: '12px 24px', backgroundColor: '#ffffff', color: '#1a1d23', border: 'none', borderRadius: '14px', fontWeight: '800', cursor: 'pointer' };
 const inactiveTabStyle = { padding: '12px 24px', backgroundColor: 'transparent', border: 'none', borderRadius: '14px', fontWeight: '700', cursor: 'pointer' };
-const cardStyle = { backgroundColor: theme.card, backdropFilter: theme.glass, border: `1px solid ${theme.border}`, boxShadow: '0 20px 40px rgba(0,0,0,0.1)' };
+const cardStyle = { padding: '35px', borderRadius: '35px', width: '460px', textAlign: 'left', transition: '0.3s' };
 const aiBox = { padding: '20px', borderRadius: '22px', marginTop: '15px', backgroundColor: 'rgba(100,116,139,0.05)' };
 const gridContainer = { display: 'flex', gap: '15px', marginTop: '25px' };
 const gridBox = { flex: 1, padding: '18px', borderRadius: '20px', textAlign: 'center', minWidth: '80px' };
