@@ -186,14 +186,10 @@ function App() {
     const ticker2 = t2.trim().toUpperCase();
     
     if (!ticker1) return;
-    if (mode === "compare" && !manualTicker && !ticker2) {
-      alert("Please enter a second ticker for comparison.");
-      return;
-    }
 
     setLoading(true); 
     setResults([]); 
-    setComparisonData(null); 
+    setComparisonData(null);
     setShowDropdown(false);
 
     const url = (mode === "analyze" || manualTicker)
@@ -201,12 +197,19 @@ function App() {
       : `${API_BASE}/api/compare/${ticker1}/${ticker2}`;
 
     fetch(url)
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) throw new Error("Backend error");
+        return res.json();
+      })
       .then(data => {
+        console.log("Terminal Received Data:", data); // This helps us debug!
+
         if (data.stocks) {
+          // COMPARISON MODE logic
           setResults(data.stocks);
           setComparisonData({ winner: data.winner, verdict: data.verdict });
         } else if (data.symbol) {
+          // SINGLE MODE logic - wrap the object in an array []
           setResults([data]); 
         } else {
           setResults([]);
@@ -216,6 +219,7 @@ function App() {
       .catch(err => {
         console.error("Fetch error:", err);
         setLoading(false);
+        alert("Failed to load data. Please check the console (F12).");
       });
   };
 
