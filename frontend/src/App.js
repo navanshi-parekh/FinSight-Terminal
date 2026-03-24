@@ -3,9 +3,10 @@ import {
   LineChart, Line, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, 
   CartesianGrid, Legend, ComposedChart, PieChart, Pie, Cell 
 } from 'recharts';
-import { jsPDF } from 'jspdf';
+import { jsPDF } from 'jsPDF';
 import autoTable from 'jspdf-autotable';
 
+// --- FORCED PRODUCTION API URL ---
 const API_BASE = "https://finsight-api-r9d6.onrender.com";
 
 const SkeletonCard = ({ theme }) => (
@@ -16,13 +17,7 @@ const SkeletonCard = ({ theme }) => (
     </div>
     <div className="skeleton-pulse" style={{ width: '60%', height: '35px', borderRadius: '8px', backgroundColor: theme.inputBg, marginBottom: '15px' }}></div>
     <div className="skeleton-pulse" style={{ width: '100%', height: '80px', borderRadius: '15px', backgroundColor: theme.inputBg }}></div>
-    <div style={{ ...gridContainer, marginTop: '25px' }}>
-      {[1, 2, 3, 4].map(i => <div key={i} className="skeleton-pulse" style={{ flex: 1, height: '60px', borderRadius: '15px', backgroundColor: theme.inputBg }}></div>)}
-    </div>
-    <style>{`
-      @keyframes pulse { 0% { opacity: 0.6; } 50% { opacity: 1; } 100% { opacity: 0.6; } }
-      .skeleton-pulse { animation: pulse 1.5s infinite ease-in-out; }
-    `}</style>
+    <style>{`@keyframes pulse { 0% { opacity: 0.6; } 50% { opacity: 1; } 100% { opacity: 0.6; } } .skeleton-pulse { animation: pulse 1.5s infinite ease-in-out; }`}</style>
   </div>
 );
 
@@ -199,7 +194,13 @@ function App() {
       : `${API_BASE}/api/compare/${ticker1}/${ticker2}`;
 
     fetch(url)
-      .then(res => res.json())
+      .then(res => {
+        if (res.status === 429) {
+          alert("Rate limited by Yahoo Finance. Please wait 10 minutes.");
+          throw new Error("Rate limit");
+        }
+        return res.json();
+      })
       .then(data => {
         if (data.stocks) {
           setResults(data.stocks);
@@ -233,23 +234,28 @@ function App() {
   return (
     <>
       <style>{`
-        /* Global Responsive Logic */
-        @media (max-width: 768px) {
-          .sidebar { width: 100% !important; height: auto !important; position: relative !important; border-right: none !important; border-bottom: 1px solid #30363d !important; padding: 20px !important; }
-          .main-content { padding-left: 0 !important; padding: 20px !important; }
-          .search-container { flex-direction: column !important; width: 100% !important; }
-          .search-input { width: 100% !important; }
-          .stock-card { width: 100% !important; margin: 0 0 20px 0 !important; }
+        /* Desktop Default */
+        .sidebar { position: fixed; left: 0; top: 0; bottom: 0; width: 240px; padding: 40px 25px; z-index: 100; overflow-y: auto; }
+        .main-content { padding-left: 280px; padding-top: 60px; padding-right: 40px; padding-bottom: 60px; min-height: 100vh; transition: 0.3s; }
+        .search-container { display: flex; justify-content: center; gap: 12px; margin-bottom: 60px; }
+        .stock-card { width: 460px; padding: 35px; border-radius: 35px; margin-bottom: 30px; }
+
+        /* Mobile Adjustments */
+        @media (max-width: 900px) {
+          .sidebar { position: relative; width: 100%; height: auto; border-right: none !important; border-bottom: 1px solid #30363d; padding: 25px; }
+          .main-content { padding-left: 20px; padding-right: 20px; padding-top: 30px; }
+          .search-container { flex-direction: column; align-items: center; width: 100%; }
+          .search-input-wrapper { width: 100% !important; }
+          .stock-card { width: 100% !important; }
           .grid-stats { flex-wrap: wrap !important; }
-          .watchlist-container { display: flex !important; overflow-x: auto !important; gap: 10px !important; }
-          .auth-overlay { padding: 10px !important; }
-          .auth-card { width: 95% !important; padding: 30px 20px !important; }
+          .watchlist-container { display: flex; overflow-x: auto; gap: 10px; padding-bottom: 10px; }
+          .watchlist-item-wrapper { flex-shrink: 0; margin-bottom: 0 !important; }
         }
       `}</style>
 
       {showLogin && (
-        <div style={overlayStyle} className="auth-overlay">
-          <div style={{ ...loginCardStyle, backgroundColor: theme.card, backdropFilter: theme.glass, border: `1px solid ${theme.border}` }} className="auth-card">
+        <div style={overlayStyle}>
+          <div style={{ ...loginCardStyle, backgroundColor: theme.card, backdropFilter: theme.glass, border: `1px solid ${theme.border}` }}>
             <button onClick={() => setShowLogin(false)} style={closeBtnStyle}>✕</button>
             <div style={{ marginBottom: '30px' }}>
               <h2 style={{ color: theme.accent, margin: '0 0 5px 0', fontSize: '28px', fontWeight: '800' }}>Join FinSight</h2>
@@ -280,8 +286,8 @@ function App() {
         </div>
       )}
 
-      <div style={{ ...containerStyle, backgroundColor: theme.bg, color: theme.text }} className="main-content">
-        <div style={{ ...watchlistSidebar, backgroundColor: theme.sidebar, borderRight: `1px solid ${theme.border}`, backdropFilter: theme.glass }} className="sidebar">
+      <div style={{ backgroundColor: theme.bg, color: theme.text }} className="main-content">
+        <div style={{ backgroundColor: theme.sidebar, borderRight: `1px solid ${theme.border}`, backdropFilter: theme.glass }} className="sidebar">
           <div style={{ padding: '0 0 20px 0', borderBottom: `1px solid ${theme.border}`, marginBottom: '20px' }}>
             <h2 style={{ fontSize: '22px', margin: 0, color: theme.accent, fontWeight: '800', letterSpacing: '-1px' }}>FinSight</h2>
           </div>
@@ -297,7 +303,7 @@ function App() {
           <h4 style={{ fontSize: '11px', color: theme.subText, letterSpacing: '1.5px', marginBottom: '15px', fontWeight: 'bold' }}>WATCHLIST</h4>
           <div className="watchlist-container">
             {watchlist.map(symbol => (
-              <div key={symbol} style={watchlistItemWrapper}>
+              <div key={symbol} style={watchlistItemWrapper} className="watchlist-item-wrapper">
                 <div style={{ ...watchlistItem, backgroundColor: theme.inputBg, color: theme.text, border: `1px solid ${theme.border}` }} onClick={() => { setT1(symbol); setMode("analyze"); handleAction(symbol); }}>{symbol}</div>
                 <button style={removeBtn} onClick={() => setWatchlist(prev => prev.filter(s => s !== symbol))}>✕</button>
               </div>
@@ -328,14 +334,14 @@ function App() {
 
           {mode !== "portfolio" ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-              <div className="search-container" style={{ marginBottom: '60px', display: 'flex', justifyContent: 'center', gap: '12px' }} ref={dropdownRef}>
-                <div style={{ position: 'relative' }} className="search-input">
+              <div className="search-container" ref={dropdownRef}>
+                <div style={{ position: 'relative', width: '200px' }} className="search-input-wrapper">
                   <input placeholder={mode === "compare" ? "Ticker 1" : "Ticker"} value={t1} onChange={(e) => handleSearch(e.target.value, 't1')} style={{ ...inputStyle, width: '100%', height: '48px', backgroundColor: theme.inputBg, color: theme.text, borderColor: theme.border }} />
                   {showDropdown && activeInput === 't1' && <SuggestionsList suggestions={suggestions} onSelect={(s) => { setT1(s); setShowDropdown(false); }} theme={theme} />}
                 </div>
 
                 {mode === "compare" && (
-                  <div style={{ position: 'relative' }} className="search-input">
+                  <div style={{ position: 'relative', width: '200px' }} className="search-input-wrapper">
                     <input placeholder="Ticker 2" value={t2} onChange={(e) => handleSearch(e.target.value, 't2')} style={{ ...inputStyle, width: '100%', height: '48px', backgroundColor: theme.inputBg, color: theme.text, borderColor: theme.border }} />
                     {showDropdown && activeInput === 't2' && <SuggestionsList suggestions={suggestions} onSelect={(s) => { setT2(s); setShowDropdown(false); }} theme={theme} />}
                   </div>
@@ -383,6 +389,7 @@ function App() {
                             <Legend verticalAlign="top" height={36}/>
                             <Line name="Price" type="monotone" dataKey="price" stroke={statusColor} strokeWidth={4} dot={false} />
                             <Line name="20-Day SMA" type="monotone" dataKey="sma" stroke={isDarkMode ? "#8b949e" : "#64748b"} strokeWidth={2} dot={false} strokeDasharray="3 3" />
+                            <Line name="Volume Trend" type="monotone" dataKey="vpt" stroke="#a855f7" strokeWidth={2} dot={false} />
                           </ComposedChart>
                         </ResponsiveContainer>
                       </div>
@@ -494,8 +501,8 @@ const logoutBtnStyle = { background: 'rgba(248, 113, 113, 0.1)', color: '#f87171
 const riskCardStyle = { flex: 1, padding: '25px', borderRadius: '24px', textAlign: 'center', minWidth: '200px' };
 const deleteBtnStyle = { background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: '16px', padding: '10px' };
 const tradeBtn = { padding: '8px 18px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '12px', fontSize: '12px', fontWeight: '800', cursor: 'pointer' };
-const containerStyle = { padding: '60px 40px 60px 280px', fontFamily: "'Plus Jakarta Sans', sans-serif", minHeight: '100vh', transition: '0.3s' };
-const watchlistSidebar = { position: 'fixed', left: 0, top: 0, bottom: 0, width: '240px', padding: '40px 25px', textAlign: 'left', zIndex: 100, overflowY: 'auto' };
+const containerStyle = { fontFamily: "'Plus Jakarta Sans', sans-serif", minHeight: '100vh', transition: '0.3s' };
+const watchlistSidebar = { width: '240px', padding: '40px 25px', textAlign: 'left', zIndex: 100, overflowY: 'auto' };
 const watchlistItemWrapper = { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px', flexShrink: 0 };
 const watchlistItem = { padding: '14px', borderRadius: '14px', cursor: 'pointer', fontWeight: '800', fontSize: '13px', flex: 1 };
 const removeBtn = { background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', fontWeight: 'bold' };
@@ -504,7 +511,7 @@ const mainBtn = { padding: '15px 35px', backgroundColor: '#38bdf8', color: 'whit
 const modeTabContainer = { display: 'inline-flex', padding: '6px', borderRadius: '18px', flexWrap: 'wrap', justifyContent: 'center' };
 const activeTabStyle = { padding: '12px 24px', backgroundColor: '#ffffff', color: '#1a1d23', border: 'none', borderRadius: '14px', fontWeight: '800', cursor: 'pointer' };
 const inactiveTabStyle = { padding: '12px 24px', backgroundColor: 'transparent', border: 'none', borderRadius: '14px', fontWeight: '700', cursor: 'pointer' };
-const cardStyle = { padding: '35px', borderRadius: '35px', width: '460px', textAlign: 'left', transition: '0.3s' };
+const cardStyle = { backgroundColor: theme.card, backdropFilter: theme.glass, border: `1px solid ${theme.border}`, boxShadow: '0 20px 40px rgba(0,0,0,0.1)' };
 const aiBox = { padding: '20px', borderRadius: '22px', marginTop: '15px', backgroundColor: 'rgba(100,116,139,0.05)' };
 const gridContainer = { display: 'flex', gap: '15px', marginTop: '25px' };
 const gridBox = { flex: 1, padding: '18px', borderRadius: '20px', textAlign: 'center', minWidth: '80px' };
