@@ -8,7 +8,7 @@ import {
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-const API_BASE = "http://127.0.0.1:8000";
+const API_BASE = "https://finsight-api-r9d6.onrender.com";
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
 const makeTheme = (dark) => ({
