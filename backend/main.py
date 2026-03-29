@@ -1,240 +1,326 @@
-import sqlite3
+# main.py — FinSight Terminal Backend
+# FMP for global stocks + yfinance fallback for Indian stocks (NSE/BSE)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import time
+import httpx
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import json
+from datetime import datetime, timedelta
 
 app = FastAPI()
 
-@app.get("/")
-def read_root():
-    return {"status": "FinSight API is Live", "version": "3.0"}
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # This allows the frontend to talk to the backend from any URL
-    allow_credentials=True,
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- DATABASE SETUP ---
-def init_db():
-    conn = sqlite3.connect('finsight.db')
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS users 
-                 (username TEXT PRIMARY KEY, password TEXT, balance REAL)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS portfolio 
-                 (username TEXT, symbol TEXT, qty INTEGER, avgPrice REAL,
-                  PRIMARY KEY (username, symbol))''')
-    conn.commit()
-    conn.close()
+FMP_KEY  = "tmRl3Cj23ZcuadgcojQKefrai83sKIwP"
+FMP_BASE = "https://financialmodelingprep.com/stable"
 
-init_db()
+# Known Indian exchange suffixes
+INDIAN_SUFFIXES = (".NS", ".BO")
 
-# --- AUTH & PORTFOLIO MANAGEMENT ---
+# Popular NSE tickers that don't need a suffix hint
+KNOWN_NSE = {
+    "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "HINDUNILVR",
+    "SBIN", "BAJFINANCE", "BHARTIARTL", "KOTAKBANK", "LT", "AXISBANK",
+    "ASIANPAINT", "MARUTI", "TITAN", "SUNPHARMA", "WIPRO", "ULTRACEMCO",
+    "NESTLEIND", "POWERGRID", "NTPC", "ONGC", "TECHM", "HCLTECH",
+    "DIVISLAB", "DRREDDY", "CIPLA", "APOLLOHOSP", "ADANIENT", "ADANIPORTS",
+    "TATAMOTORS", "TATASTEEL", "JSWSTEEL", "HINDALCO", "COALINDIA",
+    "BPCL", "INDUSINDBK", "GRASIM", "EICHERMOT", "BAJAJ-AUTO",
+    "BAJAJFINSV", "BRITANNIA", "HEROMOTOCO", "ITC", "M&M", "VEDL",
+    "ASHOKLEY", "TATAPOWER", "IRCTC", "PIDILITIND", "SIEMENS", "HAVELLS",
+    "DMART", "NAUKRI", "ZOMATO", "PAYTM", "NYKAA", "POLICYBAZAAR"
+}
 
-@app.post("/api/register")
-async def register(data: dict):
-    conn = sqlite3.connect('finsight.db')
-    c = conn.cursor()
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def is_indian(ticker: str) -> bool:
+    """Detect if a ticker is Indian (NSE/BSE)."""
+    upper = ticker.upper()
+    return upper.endswith(INDIAN_SUFFIXES) or upper in KNOWN_NSE
+
+
+def resolve_yf_ticker(ticker: str) -> str:
+    """Add .NS suffix for NSE if not already suffixed."""
+    upper = ticker.upper()
+    if upper.endswith(INDIAN_SUFFIXES):
+        return upper
+    return upper + ".NS"
+
+
+def fmp_get(path: str, params: dict = {}) -> dict | list:
+    params = {**params, "apikey": FMP_KEY}
     try:
-        c.execute("INSERT INTO users VALUES (?, ?, ?)", 
-                  (data['username'], data['password'], data.get('balance', 1000000)))
-        conn.commit()
-        return {"success": True}
-    except sqlite3.IntegrityError:
-        return {"success": False, "message": "Username already exists"}
-    finally:
-        conn.close()
-
-@app.post("/api/login")
-async def login(data: dict):
-    conn = sqlite3.connect('finsight.db')
-    c = conn.cursor()
-    c.execute("SELECT username, balance FROM users WHERE username=? AND password=?", 
-              (data['username'], data['password']))
-    user = c.fetchone()
-    if user:
-        c.execute("SELECT symbol, qty, avgPrice FROM portfolio WHERE username=?", (user[0],))
-        portfolio = [{"symbol": r[0], "qty": r[1], "avgPrice": r[2]} for r in c.fetchall()]
-        conn.close()
-        return {"success": True, "user": user[0], "balance": user[1], "portfolio": portfolio}
-    conn.close()
-    return {"success": False, "message": "Invalid Credentials"}
-
-@app.post("/api/update-holding")
-async def update_holding(data: dict):
-    username = data.get("username")
-    symbol = data.get("symbol").upper()
-    qty = int(data.get("qty"))
-    avg_price = float(data.get("avgPrice")) # Manual user input price
-    
-    conn = sqlite3.connect('finsight.db')
-    c = conn.cursor()
-    # Using REPLACE to update existing or insert new
-    c.execute("""INSERT OR REPLACE INTO portfolio (username, symbol, qty, avgPrice) 
-                 VALUES (?, ?, ?, ?)""", (username, symbol, qty, avg_price))
-    conn.commit()
-    
-    c.execute("SELECT symbol, qty, avgPrice FROM portfolio WHERE username=?", (username,))
-    new_portfolio = [{"symbol": r[0], "qty": r[1], "avgPrice": r[2]} for r in c.fetchall()]
-    conn.close()
-    return {"success": True, "portfolio": new_portfolio}
-
-@app.post("/api/remove-holding")
-async def remove_holding(data: dict):
-    username = data.get("username")
-    symbol = data.get("symbol").upper()
-    
-    conn = sqlite3.connect('finsight.db')
-    c = conn.cursor()
-    c.execute("DELETE FROM portfolio WHERE username=? AND symbol=?", (username, symbol))
-    conn.commit()
-    
-    c.execute("SELECT symbol, qty, avgPrice FROM portfolio WHERE username=?", (username,))
-    new_portfolio = [{"symbol": r[0], "qty": r[1], "avgPrice": r[2]} for r in c.fetchall()]
-    conn.close()
-    return {"success": True, "portfolio": new_portfolio}
-
-# --- NEW PREDICTIVE ANALYTICS ENDPOINT ---
-
-@app.get("/api/portfolio-analysis/{username}")
-def analyze_portfolio(username: str):
-    conn = sqlite3.connect('finsight.db')
-    c = conn.cursor()
-    c.execute("SELECT symbol, qty, avgPrice FROM portfolio WHERE username=?", (username,))
-    holdings = c.fetchall()
-    conn.close()
-
-    if not holdings: return {"error": "No holdings found"}
-
-    try:
-        symbols = [h[0] for h in holdings]
-        all_tickers = symbols + ["^NSEI"]
-        data = yf.download(all_tickers, period="1y")['Close'].ffill().dropna()
-        returns = data.pct_change().dropna()
-
-        # Portfolio Beta
-        total_value = sum(h[1] * data[h[0]].iloc[-1] for h in holdings)
-        individual_betas = {}
-        market_returns = returns["^NSEI"]
-        
-        portfolio_beta = 0
-        for h in holdings:
-            sym = h[0]
-            beta = returns[sym].cov(market_returns) / market_returns.var() if market_returns.var() != 0 else 1.0
-            individual_betas[sym] = round(beta, 2)
-            weight = (h[1] * data[sym].iloc[-1]) / total_value
-            portfolio_beta += beta * weight
-
-        # Diversification Score
-        div_score = 0
-        if len(symbols) > 1:
-            avg_corr = returns[symbols].corr().values[np.triu_indices(len(symbols), k=1)].mean()
-            div_score = round((1 - max(0, avg_corr)) * 100)
-
-        return {
-            "portfolio_beta": round(portfolio_beta, 2),
-            "diversification_score": div_score,
-            "individual_betas": individual_betas,
-            "prediction": "Aggressive" if portfolio_beta > 1.2 else "Defensive" if portfolio_beta < 0.8 else "Market-Neutral"
-        }
+        with httpx.Client(timeout=20) as client:
+            r = client.get(f"{FMP_BASE}{path}", params=params)
+            r.raise_for_status()
+            return r.json()
     except Exception as e:
-        return {"error": str(e)}
+        print(f"[FMP ERROR] {path}: {e}")
+        return {}
 
-# --- CORE ANALYSIS LOGIC ---
 
-def process_stock_data(ticker: str):
+def calc_rsi(prices: pd.Series, window: int = 14) -> float:
+    delta = prices.diff()
+    gain  = delta.where(delta > 0, 0).rolling(window).mean()
+    loss  = (-delta.where(delta < 0, 0)).rolling(window).mean()
+    rs    = gain / loss
+    rsi   = 100 - (100 / (1 + rs))
+    return float(rsi.iloc[-1]) if not rsi.empty else 50.0
+
+
+def calc_vpt_scaled(prices: pd.Series, volumes: pd.Series) -> pd.Series:
+    vpt            = (volumes * prices.pct_change()).cumsum().fillna(0)
+    vpt_min, vpt_max = vpt.min(), vpt.max()
+    p_min,   p_max   = prices.min(), prices.max()
+    return ((vpt - vpt_min) / (vpt_max - vpt_min + 1e-9)) * (p_max - p_min) + p_min
+
+
+def build_history(prices, sma_20, vpt_scaled) -> list:
+    tail_prices = prices.tail(60)
+    tail_sma    = sma_20.tail(60)
+    tail_vpt    = vpt_scaled.tail(60) if not vpt_scaled.empty else pd.Series(dtype=float)
+    history = []
+    for d, p in tail_prices.items():
+        sma_val = tail_sma.get(d)
+        vpt_val = tail_vpt.get(d) if not tail_vpt.empty else None
+        history.append({
+            "date":  str(d.date()),
+            "price": round(float(p), 2),
+            "sma":   round(float(sma_val), 2) if sma_val is not None and not np.isnan(float(sma_val)) else None,
+            "vpt":   round(float(vpt_val), 2) if vpt_val is not None and not np.isnan(float(vpt_val)) else None,
+        })
+    return history
+
+
+def build_metrics(ticker, prices, volumes, sector, industry, exchange,
+                  current_price, mkt_cap, beta, pe_ratio, debt_equity,
+                  dividend_msg, business_summary, company_name):
+    sma_20      = prices.rolling(20).mean()
+    current_rsi = calc_rsi(prices)
+    vpt_scaled  = calc_vpt_scaled(prices, volumes) if not volumes.empty else pd.Series(dtype=float)
+
+    returns       = prices.pct_change().dropna()
+    volatility    = float(returns.std() * np.sqrt(252) * 100)
+    annual_return = float(((prices.iloc[-1] / prices.iloc[0]) - 1) * 100)
+    sharpe        = (annual_return - 7.0) / volatility if volatility != 0 else 0
+
+    verdict    = "Bargain" if current_rsi < 35 else "Expensive" if current_rsi > 65 else "Fairly Priced"
+    rec        = "✅ Buy" if current_rsi < 60 and sharpe > 0.5 else "⏳ Hold/Wait"
+    currency   = "₹" if is_indian(ticker) else "$"
+    ai_summary = (
+        f"{ticker} ({sector}) is currently {verdict.lower()}. "
+        f"Sharpe: {round(sharpe, 2)} | 1Y Return: {round(annual_return, 1)}% | "
+        f"Volatility: {round(volatility, 1)}%."
+    )
+
+    return {
+        "symbol":         ticker,
+        "name":           company_name,
+        "price":          round(float(current_price), 2),
+        "currency":       currency,
+        "vol":            round(volatility, 1),
+        "return":         round(annual_return, 1),
+        "sharpe":         round(sharpe, 2),
+        "risk":           "High" if volatility > 30 else "Low" if volatility < 15 else "Medium",
+        "verdict":        verdict,
+        "sector":         sector,
+        "industry":       industry,
+        "exchange":       exchange,
+        "mkt_cap":        mkt_cap,
+        "beta":           round(float(beta), 2) if beta else "N/A",
+        "debt_equity":    debt_equity,
+        "pe_ratio":       pe_ratio,
+        "dividend":       dividend_msg,
+        "summary":        business_summary,
+        "recommendation": rec,
+        "ai_summary":     ai_summary,
+        "history":        build_history(prices, sma_20, vpt_scaled),
+        "raw_returns":    returns.tolist(),
+    }
+
+
+# ── Indian stocks via yfinance ────────────────────────────────────────────────
+
+def process_indian_stock(ticker: str) -> dict:
+    yf_ticker = resolve_yf_ticker(ticker)
+    display   = ticker.upper().replace(".NS", "").replace(".BO", "")
+
     try:
-        ticker_obj = yf.Ticker(ticker.upper())
-        df = ticker_obj.history(period="1y")
-        if df.empty: return {"error": f"Ticker {ticker} not found."}
+        obj = yf.Ticker(yf_ticker)
+        df  = obj.history(period="1y")
+        if df.empty:
+            # Try BSE if NSE fails
+            yf_ticker = display + ".BO"
+            obj = yf.Ticker(yf_ticker)
+            df  = obj.history(period="1y")
+        if df.empty:
+            return {"error": f"'{display}' not found on NSE or BSE."}
 
-        prices = df['Close'].ffill().dropna()
-        volumes = df['Volume'].ffill().dropna() 
-        info = ticker_obj.info
+        prices  = df["Close"].ffill().dropna()
+        volumes = df["Volume"].ffill().dropna()
+        info    = obj.info
 
-        sma_20 = prices.rolling(window=20).mean()
-        vpt = (volumes * prices.pct_change()).cumsum().fillna(0)
-        vpt_scaled = ((vpt - vpt.min()) / (vpt.max() - vpt.min() + 1e-9)) * (prices.max() - prices.min()) + prices.min()
+        sector           = info.get("sector") or "General Market"
+        industry         = info.get("industry") or ""
+        business_summary = info.get("longBusinessSummary") or "No description available."
+        current_price    = info.get("currentPrice") or info.get("regularMarketPrice") or float(prices.iloc[-1])
+        mkt_cap          = info.get("marketCap")
+        beta             = info.get("beta")
+        exchange         = "NSE" if yf_ticker.endswith(".NS") else "BSE"
+        company_name     = info.get("longName") or info.get("shortName") or display
 
-        returns = prices.pct_change().dropna()
-        volatility = float(returns.std() * np.sqrt(252) * 100)
-        annual_return = float(((prices.iloc[-1] / prices.iloc[0]) - 1) * 100)
-        sharpe = (annual_return - 7.0) / volatility if volatility != 0 else 0
-        
-        sector = info.get('sector', 'General Market')
-        verdict = "Bargain" if sharpe > 1.5 else "Expensive" if sharpe < 0.5 else "Fairly Priced"
-        
-        history_data = []
-        for d, p in prices.tail(60).items():
-            history_data.append({
-                "date": str(d.date()),
-                "price": round(float(p), 2),
-                "sma": round(float(sma_20[d]), 2) if not np.isnan(sma_20[d]) else None,
-                "vpt": round(float(vpt_scaled[d]), 2) if not np.isnan(vpt_scaled[d]) else None
-            })
+        pe_raw      = info.get("trailingPE")
+        pe_ratio    = round(float(pe_raw), 2) if pe_raw else "N/A"
+        de_raw      = info.get("debtToEquity")
+        debt_equity = round(float(de_raw), 2) if de_raw else "N/A"
+        div_raw     = info.get("dividendYield") or info.get("dividendRate") or 0
+        dividend_msg = f"💰 Dividend ({round(float(div_raw) * 100, 2)}%)" if div_raw and float(div_raw) > 0 else None
 
-        return {
-            "symbol": ticker.upper(),
-            "price": round(float(prices.iloc[-1]), 2),
-            "vol": round(volatility, 1),
-            "return": round(annual_return, 1),
-            "sharpe": round(sharpe, 2),
-            "risk": "High" if volatility > 30 else "Low" if volatility < 15 else "Medium",
-            "verdict": verdict,
-            "sector": sector,
-            "debt_equity": info.get('debtToEquity', 'N/A'),
-            "pe_ratio": round(info.get('trailingPE', 0), 2) if info.get('trailingPE') else 'N/A',
-            "summary": info.get('longBusinessSummary', 'No detailed description available.'),
-            "recommendation": "✅ Buy" if sharpe > 1 else "⏳ Hold/Wait",
-            "ai_summary": f"{ticker.upper()} analysis suggests a {verdict.lower()} profile with a Sharpe of {round(sharpe, 2)}.",
-            "history": history_data,
-            "raw_returns": returns.tolist()
-        }
-    except Exception as e: return {"error": str(e)}
+        return build_metrics(
+            display, prices, volumes, sector, industry, exchange,
+            current_price, mkt_cap, beta, pe_ratio, debt_equity,
+            dividend_msg, business_summary, company_name
+        )
+    except Exception as e:
+        return {"error": f"Error fetching Indian stock '{display}': {str(e)}"}
+
+
+# ── Global stocks via FMP ─────────────────────────────────────────────────────
+
+def process_fmp_stock(ticker: str) -> dict:
+    end_date   = datetime.today().strftime("%Y-%m-%d")
+    start_date = (datetime.today() - timedelta(days=365)).strftime("%Y-%m-%d")
+
+    hist_raw = fmp_get("/historical-price-eod/full", {"symbol": ticker, "from": start_date, "to": end_date})
+
+    if isinstance(hist_raw, list):
+        historical = hist_raw
+    elif isinstance(hist_raw, dict):
+        historical = hist_raw.get("historical", [])
+    else:
+        historical = []
+
+    if not historical:
+        return {"error": f"Ticker '{ticker}' not found or FMP returned no data."}
+
+    hist         = pd.DataFrame(historical).sort_values("date")
+    hist["date"] = pd.to_datetime(hist["date"])
+    hist         = hist.set_index("date")
+    prices       = hist["close"].ffill().dropna()
+    volumes      = hist["volume"].ffill().dropna() if "volume" in hist.columns else pd.Series(dtype=float)
+
+    if prices.empty:
+        return {"error": f"No price data for {ticker}."}
+
+    profile_raw = fmp_get("/profile", {"symbol": ticker})
+    profile = profile_raw[0] if isinstance(profile_raw, list) and profile_raw else (profile_raw if isinstance(profile_raw, dict) else {})
+
+    ratios_raw = fmp_get("/ratios-ttm", {"symbol": ticker})
+    ratios = ratios_raw[0] if isinstance(ratios_raw, list) and ratios_raw else (ratios_raw if isinstance(ratios_raw, dict) else {})
+
+    sector           = profile.get("sector") or "General Market"
+    industry         = profile.get("industry") or ""
+    business_summary = profile.get("description") or "No description available."
+    current_price    = profile.get("price") or round(float(prices.iloc[-1]), 2)
+    mkt_cap          = profile.get("marketCap")
+    beta             = profile.get("beta")
+    exchange         = profile.get("exchange") or ""
+    company_name     = profile.get("companyName") or ticker
+
+    pe_ratio    = ratios.get("peRatioTTM")
+    pe_ratio    = round(float(pe_ratio), 2) if pe_ratio else "N/A"
+    debt_equity = ratios.get("debtEquityRatioTTM")
+    debt_equity = round(float(debt_equity), 2) if debt_equity else "N/A"
+    div_yield   = profile.get("lastDividend") or 0
+    dividend_msg = f"💰 Dividend (${round(float(div_yield), 2)})" if div_yield and float(div_yield) > 0 else None
+
+    return build_metrics(
+        ticker, prices, volumes, sector, industry, exchange,
+        current_price, mkt_cap, beta, pe_ratio, debt_equity,
+        dividend_msg, business_summary, company_name
+    )
+
+
+# ── Router ────────────────────────────────────────────────────────────────────
+
+def process_stock_data(ticker: str) -> dict:
+    ticker = ticker.upper().strip()
+    if is_indian(ticker):
+        return process_indian_stock(ticker)
+    result = process_fmp_stock(ticker)
+    # If FMP fails, try yfinance as last resort
+    if "error" in result:
+        yf_result = process_indian_stock(ticker)
+        if "error" not in yf_result:
+            return yf_result
+    return result
+
+
+# ── Routes ────────────────────────────────────────────────────────────────────
+
+@app.get("/api/analyze/{ticker}")
+def analyze(ticker: str):
+    return process_stock_data(ticker)
+
 
 @app.get("/api/compare/{t1}/{t2}")
 def compare(t1: str, t2: str):
     s1 = process_stock_data(t1)
     s2 = process_stock_data(t2)
-    if "error" not in s1 and "error" not in s2:
-        r1, r2 = pd.Series(s1['raw_returns']), pd.Series(s2['raw_returns'])
-        correlation = round(r1.corr(r2), 2)
-        score1 = (s1['sharpe'] * 2) + (100 - s1['vol'] / 10)
-        score2 = (s2['sharpe'] * 2) + (100 - s2['vol'] / 10)
-        winner = s1['symbol'] if score1 > score2 else s2['symbol']
-        return {"stocks": [s1, s2], "correlation": correlation, "winner": winner, 
-                "verdict": f"Correlation: {correlation}. {'Diverse' if correlation < 0.7 else 'Similar'} move."}
-    return [s1, s2]
+
+    if "error" in s1 or "error" in s2:
+        return [s1, s2]
+
+    r1, r2  = pd.Series(s1["raw_returns"]), pd.Series(s2["raw_returns"])
+    min_len = min(len(r1), len(r2))
+    correlation = round(r1.tail(min_len).corr(r2.tail(min_len)), 2)
+
+    score1  = (s1["sharpe"] * 2) + (100 - s1["vol"] / 10)
+    score2  = (s2["sharpe"] * 2) + (100 - s2["vol"] / 10)
+    winner  = s1["symbol"] if score1 > score2 else s2["symbol"]
+    diverse = "Diversified portfolio" if correlation < 0.7 else "Highly correlated — similar risk"
+
+    return {
+        "stocks":      [s1, s2],
+        "correlation": correlation,
+        "winner":      winner,
+        "verdict":     f"Correlation: {correlation}. {diverse}.",
+    }
+
 
 @app.get("/api/search/{query}")
 def search_stocks(query: str):
-    try:
-        search = yf.Search(query, max_results=5)
-        return [{"symbol": q['symbol'], "name": q.get('shortname', 'N/A')} for q in search.quotes]
-    except: return []
+    # Try FMP search first
+    data = fmp_get("/search-name", {"query": query, "limit": 5})
+    if not isinstance(data, list):
+        data = fmp_get("/search-symbol", {"query": query, "limit": 5})
 
-@app.get("/api/analyze/{ticker}")
-def analyze(ticker: str): return process_stock_data(ticker)
+    results = []
+    if isinstance(data, list):
+        results = [
+            {"symbol": i.get("symbol",""), "name": i.get("name") or i.get("companyName","N/A"), "exchange": i.get("exchangeShortName","")}
+            for i in data if i.get("symbol")
+        ]
 
-def fetch_with_retry(ticker_symbol, retries=3):
-    for i in range(retries):
-        try:
-            data = yf.Ticker(ticker_symbol, session=session) # Use the session we added
-            hist = data.history(period="1mo")
-            if not hist.empty:
-                return data
-        except Exception:
-            time.sleep(2 ** i)
-    return None
+    # Also add NSE suggestion if query looks Indian
+    query_upper = query.upper()
+    if query_upper in KNOWN_NSE or any(query_upper == s[:len(query_upper)] for s in KNOWN_NSE):
+        nse_match = [s for s in KNOWN_NSE if s.startswith(query_upper)]
+        for sym in nse_match[:3]:
+            if not any(r["symbol"] == sym for r in results):
+                results.append({"symbol": sym, "name": f"{sym} (NSE)", "exchange": "NSE"})
 
-if __name__ == "__main__":
-    import uvicorn
-    import os
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    return results[:7]
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "fmp": "stable", "indian": "yfinance"}
