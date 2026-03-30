@@ -4,4 +4,4 @@ httpx
 pandas
 numpy
 yfinance
-requests
+curl_cffi
