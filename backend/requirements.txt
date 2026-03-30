@@ -3,5 +3,4 @@ uvicorn[standard]
 httpx
 pandas
 numpy
-yfinance
-curl_cffi
+openchart
