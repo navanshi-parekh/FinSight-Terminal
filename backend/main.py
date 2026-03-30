@@ -1,5 +1,5 @@
 # main.py — FinSight Terminal Backend
-# FMP for global stocks + Stooq for Indian stocks (free, no key, no IP blocking)
+# FMP for global stocks + Twelve Data for Indian stocks (NSE/BSE)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,7 +7,6 @@ import httpx
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from io import StringIO
 
 app = FastAPI()
 
@@ -18,8 +17,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-FMP_KEY  = "tmRl3Cj23ZcuadgcojQKefrai83sKIwP"
-FMP_BASE = "https://financialmodelingprep.com/stable"
+FMP_KEY   = "tmRl3Cj23ZcuadgcojQKefrai83sKIwP"
+FMP_BASE  = "https://financialmodelingprep.com/stable"
+TD_KEY    = "90b58bb09bb24eec8a9dcad7c663d8ce"
+TD_BASE   = "https://api.twelvedata.com"
 
 INDIAN_SUFFIXES = (".NS", ".BO")
 
@@ -64,44 +65,16 @@ def fmp_get(path: str, params: dict = {}) -> dict | list:
         return {}
 
 
-def fetch_stooq(symbol: str) -> pd.DataFrame:
-    """
-    Fetch daily OHLCV from Stooq.
-    NSE tickers use .NS suffix on Stooq e.g. ASHOKLEY.NS
-    URL: https://stooq.com/q/d/l/?s=ASHOKLEY.NS&i=d
-    Returns CSV with columns: Date,Open,High,Low,Close,Volume
-    """
-    stooq_sym = f"{symbol}.NS".lower()
-    url = f"https://stooq.com/q/d/l/?s={stooq_sym}&i=d"
-
+def td_get(path: str, params: dict = {}) -> dict:
+    params = {**params, "apikey": TD_KEY}
     try:
-        with httpx.Client(timeout=20, follow_redirects=True,
-                          headers={"User-Agent": "Mozilla/5.0"}) as client:
-            r = client.get(url)
+        with httpx.Client(timeout=20) as client:
+            r = client.get(f"{TD_BASE}{path}", params=params)
             r.raise_for_status()
-
-            text = r.text.strip()
-            if "No data" in text or len(text) < 50:
-                return pd.DataFrame()
-
-            df = pd.read_csv(StringIO(text))
-            df.columns = [c.strip() for c in df.columns]
-            df["Date"] = pd.to_datetime(df["Date"])
-            df = df.sort_values("Date").set_index("Date")
-
-            # Keep only last 365 days
-            cutoff = datetime.now() - timedelta(days=365)
-            df = df[df.index >= pd.Timestamp(cutoff)]
-
-            result = pd.DataFrame()
-            result["Close"]  = pd.to_numeric(df["Close"],  errors="coerce")
-            result["Volume"] = pd.to_numeric(df["Volume"], errors="coerce")
-
-            return result.dropna(subset=["Close"])
-
+            return r.json()
     except Exception as e:
-        print(f"[STOOQ ERROR] {symbol}: {e}")
-        return pd.DataFrame()
+        print(f"[TD ERROR] {path}: {e}")
+        return {}
 
 
 def calc_rsi(prices: pd.Series, window: int = 14) -> float:
@@ -183,36 +156,76 @@ def build_metrics(ticker, prices, volumes, sector, industry, exchange,
     }
 
 
-# ── Indian stocks via Stooq ───────────────────────────────────────────────────
+# ── Indian stocks via Twelve Data ─────────────────────────────────────────────
 
 def process_indian_stock(ticker: str) -> dict:
     display = clean_ticker(ticker)
 
-    df = fetch_stooq(display)
+    # Twelve Data uses "NSE" as exchange for Indian stocks
+    # 1. Time series (historical prices)
+    ts = td_get("/time_series", {
+        "symbol":     display,
+        "exchange":   "NSE",
+        "interval":   "1day",
+        "outputsize": 365,
+        "format":     "JSON",
+    })
 
-    if df is None or df.empty:
-        return {"error": f"'{display}' not found. Please check the NSE ticker symbol."}
+    if not ts or ts.get("status") == "error" or "values" not in ts:
+        # Try BSE
+        ts = td_get("/time_series", {
+            "symbol":     display,
+            "exchange":   "BSE",
+            "interval":   "1day",
+            "outputsize": 365,
+            "format":     "JSON",
+        })
+        exchange = "BSE"
+    else:
+        exchange = "NSE"
 
-    prices  = df["Close"].ffill().dropna()
-    volumes = df["Volume"].ffill().dropna() if "Volume" in df.columns else pd.Series(dtype=float)
+    if not ts or "values" not in ts:
+        msg = ts.get("message", "Not found") if ts else "No response"
+        return {"error": f"'{display}' not found on NSE/BSE via Twelve Data: {msg}"}
+
+    # Build DataFrame — TD returns newest first
+    records = ts["values"]
+    df = pd.DataFrame(records)
+    df["datetime"] = pd.to_datetime(df["datetime"])
+    df = df.sort_values("datetime").set_index("datetime")
+
+    prices  = pd.to_numeric(df["close"],  errors="coerce").ffill().dropna()
+    volumes = pd.to_numeric(df["volume"], errors="coerce").ffill().dropna() if "volume" in df.columns else pd.Series(dtype=float)
 
     if prices.empty:
         return {"error": f"No price data for '{display}'."}
 
+    current_price = float(prices.iloc[-1])
+
+    # 2. Company profile from Twelve Data
+    profile = td_get("/profile", {"symbol": display, "exchange": exchange})
+    company_name     = profile.get("name") or display
+    sector           = profile.get("sector") or "General Market"
+    industry         = profile.get("industry") or ""
+    business_summary = profile.get("description") or f"{display} listed on {exchange} India."
+    mkt_cap          = profile.get("market_cap") or None
+
+    # 3. Statistics
+    stats = td_get("/statistics", {"symbol": display, "exchange": exchange})
+    valuations = stats.get("valuations_metrics", {})
+    financials = stats.get("financials", {})
+
+    pe_raw      = valuations.get("trailing_pe")
+    pe_ratio    = round(float(pe_raw), 2) if pe_raw else "N/A"
+    de_raw      = financials.get("balance_sheet", {}).get("total_debt_to_equity_mrq")
+    debt_equity = round(float(de_raw), 2) if de_raw else "N/A"
+    div_raw     = stats.get("dividends_and_splits", {}).get("forward_annual_dividend_yield")
+    dividend_msg = f"💰 Dividend ({round(float(div_raw)*100, 2)}%)" if div_raw and float(div_raw) > 0 else None
+
     return build_metrics(
-        display, prices, volumes,
-        sector="General Market",
-        industry="",
-        exchange="NSE",
-        current_price=float(prices.iloc[-1]),
-        mkt_cap=None,
-        beta=None,
-        pe_ratio="N/A",
-        debt_equity="N/A",
-        dividend_msg=None,
-        business_summary=f"{display} — NSE India equity.",
-        company_name=display,
-        currency="₹"
+        display, prices, volumes, sector, industry, exchange,
+        current_price, mkt_cap, None, pe_ratio, debt_equity,
+        dividend_msg, business_summary, company_name, currency="₹"
     )
 
 
@@ -341,26 +354,24 @@ def search_stocks(query: str):
 
 @app.get("/debug/indian/{ticker}")
 def debug_indian(ticker: str):
-    display   = clean_ticker(ticker)
-    stooq_sym = f"{display}.NS".lower()
-    url       = f"https://stooq.com/q/d/l/?s={stooq_sym}&i=d"
-    try:
-        with httpx.Client(timeout=20, follow_redirects=True,
-                          headers={"User-Agent": "Mozilla/5.0"}) as client:
-            r   = client.get(url)
-            df  = fetch_stooq(display)
-            return {
-                "stooq_url":   url,
-                "http_status": r.status_code,
-                "rows":        len(df) if df is not None else 0,
-                "empty":       df.empty if df is not None else True,
-                "sample":      df.tail(3).to_dict() if df is not None and not df.empty else {},
-                "raw_preview": r.text[:300],
-            }
-    except Exception as e:
-        return {"error": str(e)}
+    display = clean_ticker(ticker)
+    ts = td_get("/time_series", {
+        "symbol":     display,
+        "exchange":   "NSE",
+        "interval":   "1day",
+        "outputsize": 5,
+        "format":     "JSON",
+    })
+    return {
+        "symbol":   display,
+        "td_status": ts.get("status") if ts else "no response",
+        "td_keys":  list(ts.keys()) if ts else [],
+        "message":  ts.get("message", ""),
+        "rows":     len(ts.get("values", [])) if ts else 0,
+        "sample":   ts.get("values", [])[:2] if ts else [],
+    }
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "global": "FMP Stable", "indian": "Stooq"}
+    return {"status": "ok", "global": "FMP Stable", "indian": "Twelve Data"}
