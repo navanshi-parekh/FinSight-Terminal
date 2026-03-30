@@ -151,7 +151,7 @@ def build_metrics(ticker, prices, volumes, sector, industry, exchange,
 def process_indian_stock(ticker: str) -> dict:
     display  = clean_ticker(ticker)
     # openchart uses "SYMBOL-EQ" format for equities
-    oc_symbol = f"{display}-EQ"
+    oc_symbol = display
 
     try:
         end   = datetime.now()
