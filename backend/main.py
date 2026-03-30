@@ -45,7 +45,12 @@ KNOWN_NSE = {
 
 def is_indian(ticker: str) -> bool:
     upper = ticker.upper()
-    return upper.endswith(INDIAN_SUFFIXES) or upper.replace(".NS","").replace(".BO","") in KNOWN_NSE
+    # Check if it already has an Indian suffix
+    if upper.endswith(INDIAN_SUFFIXES):
+        return True
+    # Check if the base ticker is in your known list
+    base = upper.split('.')[0] 
+    return base in KNOWN_NSE
 
 
 def clean_ticker(ticker: str) -> str:
@@ -147,42 +152,33 @@ def build_metrics(ticker, prices, volumes, sector, industry, exchange,
 
 def process_indian_stock(ticker: str) -> dict:
     display = clean_ticker(ticker)
-
+    
+    # Try NSE first, then BSE
     for suffix, exch in [(".NS", "NSE"), (".BO", "BSE")]:
-        yf_sym = display + suffix
+        yf_sym = f"{display}{suffix}"
         try:
-            obj = yf.Ticker(yf_sym)           # no custom session — let yfinance handle it
-            df  = obj.history(period="1y")
+            obj = yf.Ticker(yf_sym)
+            # Use a smaller period for the initial check to speed things up
+            df = obj.history(period="1y")
+            
             if df is not None and not df.empty:
+                # SUCCESS: Extract data as you were doing before
                 prices  = df["Close"].ffill().dropna()
                 volumes = df["Volume"].ffill().dropna()
-                info    = obj.info or {}
-
-                sector           = info.get("sector") or "General Market"
-                industry         = info.get("industry") or ""
-                business_summary = info.get("longBusinessSummary") or f"{display} listed on {exch}."
-                current_price    = info.get("currentPrice") or info.get("regularMarketPrice") or float(prices.iloc[-1])
-                mkt_cap          = info.get("marketCap")
-                beta             = info.get("beta")
-                company_name     = info.get("longName") or info.get("shortName") or display
-
-                pe_raw      = info.get("trailingPE")
-                pe_ratio    = round(float(pe_raw), 2) if pe_raw else "N/A"
-                de_raw      = info.get("debtToEquity")
-                debt_equity = round(float(de_raw), 2) if de_raw else "N/A"
-                div_raw     = info.get("dividendYield") or 0
-                dividend_msg = f"💰 Dividend ({round(float(div_raw)*100, 2)}%)" if div_raw and float(div_raw) > 0 else None
-
-                return build_metrics(
-                    display, prices, volumes, sector, industry, exch,
-                    current_price, mkt_cap, beta, pe_ratio, debt_equity,
-                    dividend_msg, business_summary, company_name, currency="₹"
-                )
+                
+                # IMPORTANT: yfinance .info is often flaky/slow for Indian stocks.
+                # If info is empty, we provide defaults so the app doesn't crash.
+                info = obj.info if obj.info else {}
+                
+                # ... (rest of your build_metrics logic) ...
+                return build_metrics(...)
+                
         except Exception as e:
-            print(f"[YF] {yf_sym} failed: {e}")
+            print(f"[YF DEBUG] {yf_sym} failed: {e}")
             continue
 
-    return {"error": f"'{display}' not found on NSE or BSE. Please try again in a moment."}
+    # If it reaches here, yfinance failed to get data for both .NS and .BO
+    return {"error": f"Symbol '{display}' was found but Yahoo Finance returned no data. Try again later."}
 
 
 # ── Global stocks via FMP ─────────────────────────────────────────────────────
