@@ -1,5 +1,5 @@
 # main.py — FinSight Terminal Backend
-# FMP for global stocks + openchart (direct NSE feed) for Indian stocks
+# FMP for global + direct NSE India API for Indian stocks (no third-party libs)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,7 +7,6 @@ import httpx
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from openchart import NSEData
 
 app = FastAPI()
 
@@ -21,8 +20,16 @@ app.add_middleware(
 FMP_KEY  = "tmRl3Cj23ZcuadgcojQKefrai83sKIwP"
 FMP_BASE = "https://financialmodelingprep.com/stable"
 
-# Initialise NSE client once at startup (no download() needed)
-nse = NSEData()
+# NSE headers — required to avoid 401/403
+NSE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Referer": "https://www.nseindia.com/",
+    "Origin": "https://www.nseindia.com",
+    "Connection": "keep-alive",
+}
 
 INDIAN_SUFFIXES = (".NS", ".BO")
 
@@ -65,6 +72,65 @@ def fmp_get(path: str, params: dict = {}) -> dict | list:
     except Exception as e:
         print(f"[FMP ERROR] {path}: {e}")
         return {}
+
+
+def get_nse_cookies() -> dict:
+    """Get session cookies from NSE homepage — required for API calls."""
+    try:
+        with httpx.Client(timeout=15, headers=NSE_HEADERS, follow_redirects=True) as client:
+            r = client.get("https://www.nseindia.com")
+            return dict(r.cookies)
+    except Exception as e:
+        print(f"[NSE COOKIE ERROR] {e}")
+        return {}
+
+
+def fetch_nse_historical(symbol: str) -> pd.DataFrame:
+    """Fetch 1 year of daily historical data from NSE India directly."""
+    end   = datetime.now()
+    start = end - timedelta(days=365)
+
+    end_str   = end.strftime("%d-%m-%Y")
+    start_str = start.strftime("%d-%m-%Y")
+
+    url = (
+        f"https://www.nseindia.com/api/historical/cm/equity"
+        f"?symbol={symbol}&series=[%22EQ%22]"
+        f"&from={start_str}&to={end_str}&csv=true"
+    )
+
+    cookies = get_nse_cookies()
+
+    with httpx.Client(timeout=20, headers=NSE_HEADERS, follow_redirects=True) as client:
+        r = client.get(url, cookies=cookies)
+        r.raise_for_status()
+
+        # NSE returns CSV text
+        from io import StringIO
+        df = pd.read_csv(StringIO(r.text))
+
+        # Clean column names
+        df.columns = [c.strip() for c in df.columns]
+
+        # NSE CSV columns: Date, series, OPEN, HIGH, LOW, PREV. CLOSE, LTP, close, vwap, 52W H, 52W L, VOLUME, VALUE, No of trades
+        date_col  = next((c for c in df.columns if "date" in c.lower()), None)
+        close_col = next((c for c in df.columns if c.lower() in ["close", "ltp", "last"]), None)
+        vol_col   = next((c for c in df.columns if "volume" in c.lower()), None)
+
+        if not date_col or not close_col:
+            return pd.DataFrame()
+
+        df[date_col]  = pd.to_datetime(df[date_col].str.strip(), dayfirst=True)
+        df[close_col] = pd.to_numeric(df[close_col].astype(str).str.replace(",", ""), errors="coerce")
+
+        df = df.sort_values(date_col).set_index(date_col)
+        result = pd.DataFrame()
+        result["Close"]  = df[close_col]
+        if vol_col:
+            df[vol_col]      = pd.to_numeric(df[vol_col].astype(str).str.replace(",", ""), errors="coerce")
+            result["Volume"] = df[vol_col]
+
+        return result.dropna(subset=["Close"])
 
 
 def calc_rsi(prices: pd.Series, window: int = 14) -> float:
@@ -146,28 +212,22 @@ def build_metrics(ticker, prices, volumes, sector, industry, exchange,
     }
 
 
-# ── Indian stocks via openchart (direct NSE feed) ─────────────────────────────
+# ── Indian stocks via direct NSE API ─────────────────────────────────────────
 
 def process_indian_stock(ticker: str) -> dict:
-    display   = clean_ticker(ticker)
-    oc_symbol = f"{display}-EQ"   # openchart requires "SYMBOL-EQ" format
+    display = clean_ticker(ticker)
 
     try:
-        end   = datetime.now()
-        start = end - timedelta(days=400)
+        df = fetch_nse_historical(display)
 
-        # Correct openchart call: historical(symbol, exchange, start, end, interval)
-        df = nse.historical(oc_symbol, "EQ", start, end, "1d")
+        if df is None or df.empty:
+            return {"error": f"'{display}' not found on NSE. Please check the ticker symbol."}
 
-        if df is None or (hasattr(df, 'empty') and df.empty):
-            return {"error": f"'{display}' not found on NSE. Check the ticker symbol."}
-
-        df.index = pd.to_datetime(df.index)
         prices  = df["Close"].ffill().dropna()
         volumes = df["Volume"].ffill().dropna() if "Volume" in df.columns else pd.Series(dtype=float)
 
         if prices.empty:
-            return {"error": f"No price data returned for '{display}'."}
+            return {"error": f"No price data for '{display}'."}
 
         current_price = float(prices.iloc[-1])
 
@@ -316,53 +376,22 @@ def search_stocks(query: str):
 
 @app.get("/debug/indian/{ticker}")
 def debug_indian(ticker: str):
-    display   = clean_ticker(ticker)
-    oc_symbol = f"{display}-EQ"
+    display = clean_ticker(ticker)
     try:
-        end   = datetime.now()
-        start = end - timedelta(days=10)
-        df    = nse.historical(oc_symbol, "EQ", start, end, "1d")
+        cookies = get_nse_cookies()
+        df = fetch_nse_historical(display)
         return {
-            "symbol":  oc_symbol,
-            "type":    str(type(df)),
+            "symbol":  display,
+            "cookies": list(cookies.keys()),
             "rows":    len(df) if df is not None else 0,
-            "empty":   df.empty if df is not None and hasattr(df, 'empty') else True,
-            "columns": list(df.columns) if df is not None and hasattr(df, 'columns') else [],
+            "empty":   df.empty if df is not None else True,
+            "columns": list(df.columns) if df is not None and not df.empty else [],
             "sample":  df.tail(3).to_dict() if df is not None and not df.empty else {}
         }
     except Exception as e:
         return {"error": str(e), "type": type(e).__name__}
 
-@app.get("/debug/oc/{ticker}")
-def debug_oc(ticker: str):
-    display = ticker.upper()
-    results = {}
-    end   = datetime.now()
-    start = end - timedelta(days=10)
-    
-    # Try every possible format
-    combos = [
-        (f"{display}-EQ", "EQ"),
-        (display, "EQ"),
-        (f"{display}-EQ", "NSE"),
-        (display, "NSE"),
-        (f"{display}EQ", "EQ"),
-    ]
-    
-    for sym, exch in combos:
-        key = f"{sym}|{exch}"
-        try:
-            df = nse.historical(sym, exch, start, end, "1d")
-            results[key] = {
-                "rows": len(df) if df is not None else 0,
-                "empty": df.empty if df is not None else True,
-            }
-        except Exception as e:
-            results[key] = {"error": str(e)}
-    
-    return results
-
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "global": "FMP Stable", "indian": "openchart/NSE"}
+    return {"status": "ok", "global": "FMP Stable", "indian": "NSE Direct API"}
