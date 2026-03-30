@@ -23,7 +23,6 @@ FMP_BASE = "https://financialmodelingprep.com/stable"
 
 # Initialise NSE client once at startup
 nse = NSEData()
-nse.download()
 
 INDIAN_SUFFIXES = (".NS", ".BO")
 
