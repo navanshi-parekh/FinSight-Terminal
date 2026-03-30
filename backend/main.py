@@ -1,5 +1,5 @@
 # main.py — FinSight Terminal Backend
-# FMP for global + direct NSE India JSON API for Indian stocks
+# FMP for global stocks + Stooq for Indian stocks (free, no key, no IP blocking)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +7,7 @@ import httpx
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+from io import StringIO
 
 app = FastAPI()
 
@@ -19,16 +20,6 @@ app.add_middleware(
 
 FMP_KEY  = "tmRl3Cj23ZcuadgcojQKefrai83sKIwP"
 FMP_BASE = "https://financialmodelingprep.com/stable"
-
-NSE_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "*/*",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Referer": "https://www.nseindia.com/",
-    "Origin": "https://www.nseindia.com",
-    "Connection": "keep-alive",
-}
 
 INDIAN_SUFFIXES = (".NS", ".BO")
 
@@ -73,59 +64,44 @@ def fmp_get(path: str, params: dict = {}) -> dict | list:
         return {}
 
 
-def get_nse_cookies() -> dict:
-    """Visit NSE homepage to get session cookies."""
+def fetch_stooq(symbol: str) -> pd.DataFrame:
+    """
+    Fetch daily OHLCV from Stooq.
+    NSE tickers use .NS suffix on Stooq e.g. ASHOKLEY.NS
+    URL: https://stooq.com/q/d/l/?s=ASHOKLEY.NS&i=d
+    Returns CSV with columns: Date,Open,High,Low,Close,Volume
+    """
+    stooq_sym = f"{symbol}.NS".lower()
+    url = f"https://stooq.com/q/d/l/?s={stooq_sym}&i=d"
+
     try:
-        with httpx.Client(timeout=15, headers=NSE_HEADERS, follow_redirects=True) as client:
-            r = client.get("https://www.nseindia.com")
-            return dict(r.cookies)
+        with httpx.Client(timeout=20, follow_redirects=True,
+                          headers={"User-Agent": "Mozilla/5.0"}) as client:
+            r = client.get(url)
+            r.raise_for_status()
+
+            text = r.text.strip()
+            if "No data" in text or len(text) < 50:
+                return pd.DataFrame()
+
+            df = pd.read_csv(StringIO(text))
+            df.columns = [c.strip() for c in df.columns]
+            df["Date"] = pd.to_datetime(df["Date"])
+            df = df.sort_values("Date").set_index("Date")
+
+            # Keep only last 365 days
+            cutoff = datetime.now() - timedelta(days=365)
+            df = df[df.index >= pd.Timestamp(cutoff)]
+
+            result = pd.DataFrame()
+            result["Close"]  = pd.to_numeric(df["Close"],  errors="coerce")
+            result["Volume"] = pd.to_numeric(df["Volume"], errors="coerce")
+
+            return result.dropna(subset=["Close"])
+
     except Exception as e:
-        print(f"[NSE COOKIE ERROR] {e}")
-        return {}
-
-
-def fetch_nse_historical(symbol: str) -> pd.DataFrame:
-    """Fetch 1 year daily data from NSE India JSON API."""
-    end   = datetime.now()
-    start = end - timedelta(days=365)
-
-    end_str   = end.strftime("%d-%m-%Y")
-    start_str = start.strftime("%d-%m-%Y")
-
-    cookies = get_nse_cookies()
-
-    params = {
-        "symbol": symbol,
-        "series": '["EQ"]',
-        "from":   start_str,
-        "to":     end_str,
-    }
-
-    with httpx.Client(timeout=20, headers=NSE_HEADERS, follow_redirects=True) as client:
-        r = client.get(
-            "https://www.nseindia.com/api/historical/cm/equity",
-            params=params,
-            cookies=cookies
-        )
-        r.raise_for_status()
-
-        data    = r.json()
-        records = data.get("data", [])
-
-        if not records:
-            return pd.DataFrame()
-
-        df = pd.DataFrame(records)
-
-        # NSE JSON fields
-        df["CH_TIMESTAMP"] = pd.to_datetime(df["CH_TIMESTAMP"])
-        df = df.sort_values("CH_TIMESTAMP").set_index("CH_TIMESTAMP")
-
-        result = pd.DataFrame()
-        result["Close"]  = pd.to_numeric(df["CH_CLOSING_PRICE"], errors="coerce")
-        result["Volume"] = pd.to_numeric(df["CH_TOT_TRAD_QTY"],  errors="coerce")
-
-        return result.dropna(subset=["Close"])
+        print(f"[STOOQ ERROR] {symbol}: {e}")
+        return pd.DataFrame()
 
 
 def calc_rsi(prices: pd.Series, window: int = 14) -> float:
@@ -207,43 +183,37 @@ def build_metrics(ticker, prices, volumes, sector, industry, exchange,
     }
 
 
-# ── Indian stocks via NSE Direct API ─────────────────────────────────────────
+# ── Indian stocks via Stooq ───────────────────────────────────────────────────
 
 def process_indian_stock(ticker: str) -> dict:
     display = clean_ticker(ticker)
 
-    try:
-        df = fetch_nse_historical(display)
+    df = fetch_stooq(display)
 
-        if df is None or df.empty:
-            return {"error": f"'{display}' not found on NSE. Please check the ticker symbol."}
+    if df is None or df.empty:
+        return {"error": f"'{display}' not found. Please check the NSE ticker symbol."}
 
-        prices  = df["Close"].ffill().dropna()
-        volumes = df["Volume"].ffill().dropna() if "Volume" in df.columns else pd.Series(dtype=float)
+    prices  = df["Close"].ffill().dropna()
+    volumes = df["Volume"].ffill().dropna() if "Volume" in df.columns else pd.Series(dtype=float)
 
-        if prices.empty:
-            return {"error": f"No price data for '{display}'."}
+    if prices.empty:
+        return {"error": f"No price data for '{display}'."}
 
-        current_price = float(prices.iloc[-1])
-
-        return build_metrics(
-            display, prices, volumes,
-            sector="General Market",
-            industry="",
-            exchange="NSE",
-            current_price=current_price,
-            mkt_cap=None,
-            beta=None,
-            pe_ratio="N/A",
-            debt_equity="N/A",
-            dividend_msg=None,
-            business_summary=f"{display} — NSE India equity.",
-            company_name=display,
-            currency="₹"
-        )
-
-    except Exception as e:
-        return {"error": f"Error fetching '{display}' from NSE: {str(e)}"}
+    return build_metrics(
+        display, prices, volumes,
+        sector="General Market",
+        industry="",
+        exchange="NSE",
+        current_price=float(prices.iloc[-1]),
+        mkt_cap=None,
+        beta=None,
+        pe_ratio="N/A",
+        debt_equity="N/A",
+        dividend_msg=None,
+        business_summary=f"{display} — NSE India equity.",
+        company_name=display,
+        currency="₹"
+    )
 
 
 # ── Global stocks via FMP ─────────────────────────────────────────────────────
@@ -371,22 +341,26 @@ def search_stocks(query: str):
 
 @app.get("/debug/indian/{ticker}")
 def debug_indian(ticker: str):
-    display = clean_ticker(ticker)
+    display   = clean_ticker(ticker)
+    stooq_sym = f"{display}.NS".lower()
+    url       = f"https://stooq.com/q/d/l/?s={stooq_sym}&i=d"
     try:
-        cookies = get_nse_cookies()
-        df = fetch_nse_historical(display)
-        return {
-            "symbol":  display,
-            "cookies": list(cookies.keys()),
-            "rows":    len(df) if df is not None else 0,
-            "empty":   df.empty if df is not None else True,
-            "columns": list(df.columns) if df is not None and not df.empty else [],
-            "sample":  df.tail(3).to_dict() if df is not None and not df.empty else {}
-        }
+        with httpx.Client(timeout=20, follow_redirects=True,
+                          headers={"User-Agent": "Mozilla/5.0"}) as client:
+            r   = client.get(url)
+            df  = fetch_stooq(display)
+            return {
+                "stooq_url":   url,
+                "http_status": r.status_code,
+                "rows":        len(df) if df is not None else 0,
+                "empty":       df.empty if df is not None else True,
+                "sample":      df.tail(3).to_dict() if df is not None and not df.empty else {},
+                "raw_preview": r.text[:300],
+            }
     except Exception as e:
-        return {"error": str(e), "type": type(e).__name__}
+        return {"error": str(e)}
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "global": "FMP Stable", "indian": "NSE Direct API"}
+    return {"status": "ok", "global": "FMP Stable", "indian": "Stooq"}
