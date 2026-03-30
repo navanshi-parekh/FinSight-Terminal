@@ -1,11 +1,10 @@
 # main.py — FinSight Terminal Backend
-# FMP for global stocks + yfinance with session headers for Indian stocks
+# FMP for global stocks + yfinance (curl_cffi) for Indian stocks
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
 import yfinance as yf
-import requests
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -40,18 +39,6 @@ KNOWN_NSE = {
     "BANKBARODA", "PNB", "CANBK", "UNIONBANK", "FEDERALBNK", "IDFCFIRSTB",
     "PERSISTENT", "COFORGE", "LTIM", "MPHASIS", "OFSS", "KPITTECH",
 }
-
-# ── yfinance session with browser-like headers to avoid rate limiting ─────────
-def make_yf_session():
-    session = requests.Session()
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "keep-alive",
-    })
-    return session
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -156,17 +143,15 @@ def build_metrics(ticker, prices, volumes, sector, industry, exchange,
     }
 
 
-# ── Indian stocks via yfinance with browser session ───────────────────────────
+# ── Indian stocks via yfinance (curl_cffi handles anti-bot) ──────────────────
 
 def process_indian_stock(ticker: str) -> dict:
-    display   = clean_ticker(ticker)
-    session   = make_yf_session()
+    display = clean_ticker(ticker)
 
-    # Try NSE first, then BSE
     for suffix, exch in [(".NS", "NSE"), (".BO", "BSE")]:
         yf_sym = display + suffix
         try:
-            obj = yf.Ticker(yf_sym, session=session)
+            obj = yf.Ticker(yf_sym)           # no custom session — let yfinance handle it
             df  = obj.history(period="1y")
             if df is not None and not df.empty:
                 prices  = df["Close"].ffill().dropna()
@@ -326,17 +311,16 @@ def search_stocks(query: str):
 @app.get("/debug/indian/{ticker}")
 def debug_indian(ticker: str):
     display = clean_ticker(ticker)
-    session = make_yf_session()
     results = {}
     for suffix in [".NS", ".BO"]:
         yf_sym = display + suffix
         try:
-            obj = yf.Ticker(yf_sym, session=session)
+            obj = yf.Ticker(yf_sym)
             df  = obj.history(period="5d")
             results[yf_sym] = {
-                "rows": len(df) if df is not None else 0,
+                "rows":  len(df) if df is not None else 0,
                 "empty": df.empty if df is not None else True,
-                "cols": list(df.columns) if df is not None and not df.empty else []
+                "cols":  list(df.columns) if df is not None and not df.empty else []
             }
         except Exception as e:
             results[yf_sym] = {"error": str(e)}
@@ -345,4 +329,4 @@ def debug_indian(ticker: str):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "global": "FMP Stable", "indian": "yfinance+session"}
+    return {"status": "ok", "global": "FMP Stable", "indian": "yfinance+curl_cffi"}
