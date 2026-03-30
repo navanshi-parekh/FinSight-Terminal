@@ -3,4 +3,5 @@ uvicorn[standard]
 httpx
 pandas
 numpy
-openchart
+yfinance
+requests
