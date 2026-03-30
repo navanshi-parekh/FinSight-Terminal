@@ -9,6 +9,14 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 
+import requests
+
+# Create a session with a real browser User-Agent
+session = requests.Session()
+session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+})
+
 app = FastAPI()
 
 app.add_middleware(
@@ -153,33 +161,24 @@ def build_metrics(ticker, prices, volumes, sector, industry, exchange,
 def process_indian_stock(ticker: str) -> dict:
     display = clean_ticker(ticker)
     
-    # Try NSE first, then BSE
     for suffix, exch in [(".NS", "NSE"), (".BO", "BSE")]:
         yf_sym = f"{display}{suffix}"
         try:
-            obj = yf.Ticker(yf_sym)
-            # Use a smaller period for the initial check to speed things up
+            # Pass the session here!
+            obj = yf.Ticker(yf_sym, session=session) 
+            
+            # Fetch history
             df = obj.history(period="1y")
             
             if df is not None and not df.empty:
-                # SUCCESS: Extract data as you were doing before
-                prices  = df["Close"].ffill().dropna()
-                volumes = df["Volume"].ffill().dropna()
-                
-                # IMPORTANT: yfinance .info is often flaky/slow for Indian stocks.
-                # If info is empty, we provide defaults so the app doesn't crash.
-                info = obj.info if obj.info else {}
-                
-                # ... (rest of your build_metrics logic) ...
+                # ... (your existing build_metrics logic)
                 return build_metrics(...)
                 
         except Exception as e:
             print(f"[YF DEBUG] {yf_sym} failed: {e}")
             continue
 
-    # If it reaches here, yfinance failed to get data for both .NS and .BO
-    return {"error": f"Symbol '{display}' was found but Yahoo Finance returned no data. Try again later."}
-
+    return {"error": f"Yahoo Finance is currently limiting requests. Please try again in a few minutes."}
 
 # ── Global stocks via FMP ─────────────────────────────────────────────────────
 
