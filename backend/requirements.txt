@@ -3,4 +3,3 @@ uvicorn[standard]
 httpx
 pandas
 numpy
-yfinance
