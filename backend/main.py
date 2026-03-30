@@ -1,22 +1,13 @@
 # main.py — FinSight Terminal Backend
-# FMP for global stocks + yfinance (curl_cffi) for Indian stocks
+# FMP for global stocks + openchart (direct NSE feed) for Indian stocks
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
-import yfinance as yf
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-
-import time
-import requests
-
-# Create a session with a real browser User-Agent
-session = requests.Session()
-session.headers.update({
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-})
+from openchart import NSEData
 
 app = FastAPI()
 
@@ -29,6 +20,9 @@ app.add_middleware(
 
 FMP_KEY  = "tmRl3Cj23ZcuadgcojQKefrai83sKIwP"
 FMP_BASE = "https://financialmodelingprep.com/stable"
+
+# Initialise NSE client once at startup (no download() needed)
+nse = NSEData()
 
 INDIAN_SUFFIXES = (".NS", ".BO")
 
@@ -54,12 +48,7 @@ KNOWN_NSE = {
 
 def is_indian(ticker: str) -> bool:
     upper = ticker.upper()
-    # Check if it already has an Indian suffix
-    if upper.endswith(INDIAN_SUFFIXES):
-        return True
-    # Check if the base ticker is in your known list
-    base = upper.split('.')[0] 
-    return base in KNOWN_NSE
+    return upper.endswith(INDIAN_SUFFIXES) or upper.replace(".NS","").replace(".BO","") in KNOWN_NSE
 
 
 def clean_ticker(ticker: str) -> str:
@@ -157,31 +146,50 @@ def build_metrics(ticker, prices, volumes, sector, industry, exchange,
     }
 
 
-# ── Indian stocks via yfinance (curl_cffi handles anti-bot) ──────────────────
+# ── Indian stocks via openchart (direct NSE feed) ─────────────────────────────
 
 def process_indian_stock(ticker: str) -> dict:
-    display = clean_ticker(ticker)
-    
-    for suffix, exch in [(".NS", "NSE"), (".BO", "BSE")]:
-        yf_sym = f"{display}{suffix}"
-        
-        # Attempt up to 2 retries
-        for attempt in range(2):
-            try:
-                obj = yf.Ticker(yf_sym, session=session)
-                df = obj.history(period="1y")
-                
-                if df is not None and not df.empty:
-                    # ... rest of your build_metrics logic ...
-                    return build_metrics(...)
-                
-                # If empty, wait 2 seconds and retry
-                time.sleep(2) 
-            except Exception as e:
-                print(f"Attempt {attempt+1} failed: {e}")
-                time.sleep(2)
-                
-    return {"error": "Yahoo Finance is blocking this server's IP. Try a global ticker (e.g., AAPL) or try again later."}
+    display   = clean_ticker(ticker)
+    oc_symbol = f"{display}-EQ"   # openchart requires "SYMBOL-EQ" format
+
+    try:
+        end   = datetime.now()
+        start = end - timedelta(days=400)
+
+        # Correct openchart call: historical(symbol, exchange, start, end, interval)
+        df = nse.historical(oc_symbol, "EQ", start, end, "1d")
+
+        if df is None or (hasattr(df, 'empty') and df.empty):
+            return {"error": f"'{display}' not found on NSE. Check the ticker symbol."}
+
+        df.index = pd.to_datetime(df.index)
+        prices  = df["Close"].ffill().dropna()
+        volumes = df["Volume"].ffill().dropna() if "Volume" in df.columns else pd.Series(dtype=float)
+
+        if prices.empty:
+            return {"error": f"No price data returned for '{display}'."}
+
+        current_price = float(prices.iloc[-1])
+
+        return build_metrics(
+            display, prices, volumes,
+            sector="General Market",
+            industry="",
+            exchange="NSE",
+            current_price=current_price,
+            mkt_cap=None,
+            beta=None,
+            pe_ratio="N/A",
+            debt_equity="N/A",
+            dividend_msg=None,
+            business_summary=f"{display} — NSE India equity.",
+            company_name=display,
+            currency="₹"
+        )
+
+    except Exception as e:
+        return {"error": f"Error fetching '{display}' from NSE: {str(e)}"}
+
 
 # ── Global stocks via FMP ─────────────────────────────────────────────────────
 
@@ -308,23 +316,24 @@ def search_stocks(query: str):
 
 @app.get("/debug/indian/{ticker}")
 def debug_indian(ticker: str):
-    display = clean_ticker(ticker)
-    results = {}
-    for suffix in [".NS", ".BO"]:
-        yf_sym = display + suffix
-        try:
-            obj = yf.Ticker(yf_sym)
-            df  = obj.history(period="5d")
-            results[yf_sym] = {
-                "rows":  len(df) if df is not None else 0,
-                "empty": df.empty if df is not None else True,
-                "cols":  list(df.columns) if df is not None and not df.empty else []
-            }
-        except Exception as e:
-            results[yf_sym] = {"error": str(e)}
-    return results
+    display   = clean_ticker(ticker)
+    oc_symbol = f"{display}-EQ"
+    try:
+        end   = datetime.now()
+        start = end - timedelta(days=10)
+        df    = nse.historical(oc_symbol, "EQ", start, end, "1d")
+        return {
+            "symbol":  oc_symbol,
+            "type":    str(type(df)),
+            "rows":    len(df) if df is not None else 0,
+            "empty":   df.empty if df is not None and hasattr(df, 'empty') else True,
+            "columns": list(df.columns) if df is not None and hasattr(df, 'columns') else [],
+            "sample":  df.tail(3).to_dict() if df is not None and not df.empty else {}
+        }
+    except Exception as e:
+        return {"error": str(e), "type": type(e).__name__}
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "global": "FMP Stable", "indian": "yfinance+curl_cffi"}
+    return {"status": "ok", "global": "FMP Stable", "indian": "openchart/NSE"}
