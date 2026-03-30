@@ -23,6 +23,7 @@ FMP_BASE = "https://financialmodelingprep.com/stable"
 
 # Initialise NSE client once at startup
 nse = NSEData()
+nse.download()
 
 INDIAN_SUFFIXES = (".NS", ".BO")
 
@@ -151,14 +152,13 @@ def build_metrics(ticker, prices, volumes, sector, industry, exchange,
 def process_indian_stock(ticker: str) -> dict:
     display  = clean_ticker(ticker)
     # openchart uses "SYMBOL-EQ" format for equities
-    oc_symbol = display
+    oc_symbol = f"{display}-EQ"
 
     try:
         end   = datetime.now()
         start = end - timedelta(days=400)  # extra buffer for trading days
 
         df = nse.historical(oc_symbol, "EQ", start, end, "1d")
-
         if df is None or df.empty:
             return {"error": f"'{display}' not found on NSE via openchart."}
 
