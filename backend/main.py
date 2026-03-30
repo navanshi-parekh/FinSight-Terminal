@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 
+import time
 import requests
 
 # Create a session with a real browser User-Agent
@@ -163,22 +164,24 @@ def process_indian_stock(ticker: str) -> dict:
     
     for suffix, exch in [(".NS", "NSE"), (".BO", "BSE")]:
         yf_sym = f"{display}{suffix}"
-        try:
-            # Pass the session here!
-            obj = yf.Ticker(yf_sym, session=session) 
-            
-            # Fetch history
-            df = obj.history(period="1y")
-            
-            if df is not None and not df.empty:
-                # ... (your existing build_metrics logic)
-                return build_metrics(...)
+        
+        # Attempt up to 2 retries
+        for attempt in range(2):
+            try:
+                obj = yf.Ticker(yf_sym, session=session)
+                df = obj.history(period="1y")
                 
-        except Exception as e:
-            print(f"[YF DEBUG] {yf_sym} failed: {e}")
-            continue
-
-    return {"error": f"Yahoo Finance is currently limiting requests. Please try again in a few minutes."}
+                if df is not None and not df.empty:
+                    # ... rest of your build_metrics logic ...
+                    return build_metrics(...)
+                
+                # If empty, wait 2 seconds and retry
+                time.sleep(2) 
+            except Exception as e:
+                print(f"Attempt {attempt+1} failed: {e}")
+                time.sleep(2)
+                
+    return {"error": "Yahoo Finance is blocking this server's IP. Try a global ticker (e.g., AAPL) or try again later."}
 
 # ── Global stocks via FMP ─────────────────────────────────────────────────────
 
