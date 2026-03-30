@@ -1,13 +1,14 @@
 # main.py — FinSight Terminal Backend
-# FMP for global stocks + openchart for Indian stocks (NSE/BSE, no API key needed)
+# FMP for global stocks + yfinance with session headers for Indian stocks
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
+import yfinance as yf
+import requests
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from openchart import NSEData
 
 app = FastAPI()
 
@@ -20,9 +21,6 @@ app.add_middleware(
 
 FMP_KEY  = "tmRl3Cj23ZcuadgcojQKefrai83sKIwP"
 FMP_BASE = "https://financialmodelingprep.com/stable"
-
-# Initialise NSE client once at startup
-nse = NSEData()
 
 INDIAN_SUFFIXES = (".NS", ".BO")
 
@@ -42,6 +40,18 @@ KNOWN_NSE = {
     "BANKBARODA", "PNB", "CANBK", "UNIONBANK", "FEDERALBNK", "IDFCFIRSTB",
     "PERSISTENT", "COFORGE", "LTIM", "MPHASIS", "OFSS", "KPITTECH",
 }
+
+# ── yfinance session with browser-like headers to avoid rate limiting ─────────
+def make_yf_session():
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+    })
+    return session
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -83,7 +93,7 @@ def calc_vpt_scaled(prices: pd.Series, volumes: pd.Series) -> pd.Series:
     return ((vpt - vpt_min) / (vpt_max - vpt_min + 1e-9)) * (p_max - p_min) + p_min
 
 
-def build_history(prices: pd.Series, sma_20: pd.Series, vpt_scaled: pd.Series) -> list:
+def build_history(prices, sma_20, vpt_scaled) -> list:
     tail_prices = prices.tail(60)
     tail_sma    = sma_20.tail(60)
     tail_vpt    = vpt_scaled.tail(60) if not vpt_scaled.empty else pd.Series(dtype=float)
@@ -146,46 +156,48 @@ def build_metrics(ticker, prices, volumes, sector, industry, exchange,
     }
 
 
-# ── Indian stocks via openchart ───────────────────────────────────────────────
+# ── Indian stocks via yfinance with browser session ───────────────────────────
 
 def process_indian_stock(ticker: str) -> dict:
-    display  = clean_ticker(ticker)
-    # openchart uses "SYMBOL-EQ" format for equities
-    oc_symbol = f"{display}-EQ"
+    display   = clean_ticker(ticker)
+    session   = make_yf_session()
 
-    try:
-        end   = datetime.now()
-        start = end - timedelta(days=400)  # extra buffer for trading days
+    # Try NSE first, then BSE
+    for suffix, exch in [(".NS", "NSE"), (".BO", "BSE")]:
+        yf_sym = display + suffix
+        try:
+            obj = yf.Ticker(yf_sym, session=session)
+            df  = obj.history(period="1y")
+            if df is not None and not df.empty:
+                prices  = df["Close"].ffill().dropna()
+                volumes = df["Volume"].ffill().dropna()
+                info    = obj.info or {}
 
-        df = nse.historical(oc_symbol, "EQ", start, end, "1d")
-        if df is None or df.empty:
-            return {"error": f"'{display}' not found on NSE via openchart."}
+                sector           = info.get("sector") or "General Market"
+                industry         = info.get("industry") or ""
+                business_summary = info.get("longBusinessSummary") or f"{display} listed on {exch}."
+                current_price    = info.get("currentPrice") or info.get("regularMarketPrice") or float(prices.iloc[-1])
+                mkt_cap          = info.get("marketCap")
+                beta             = info.get("beta")
+                company_name     = info.get("longName") or info.get("shortName") or display
 
-        # openchart returns a DataFrame with columns: Open High Low Close Volume, index=Timestamp
-        df.index = pd.to_datetime(df.index)
-        prices  = df["Close"].ffill().dropna()
-        volumes = df["Volume"].ffill().dropna()
+                pe_raw      = info.get("trailingPE")
+                pe_ratio    = round(float(pe_raw), 2) if pe_raw else "N/A"
+                de_raw      = info.get("debtToEquity")
+                debt_equity = round(float(de_raw), 2) if de_raw else "N/A"
+                div_raw     = info.get("dividendYield") or 0
+                dividend_msg = f"💰 Dividend ({round(float(div_raw)*100, 2)}%)" if div_raw and float(div_raw) > 0 else None
 
-        if prices.empty:
-            return {"error": f"No price data for '{display}'."}
+                return build_metrics(
+                    display, prices, volumes, sector, industry, exch,
+                    current_price, mkt_cap, beta, pe_ratio, debt_equity,
+                    dividend_msg, business_summary, company_name, currency="₹"
+                )
+        except Exception as e:
+            print(f"[YF] {yf_sym} failed: {e}")
+            continue
 
-        current_price = float(prices.iloc[-1])
-
-        return build_metrics(
-            display, prices, volumes,
-            sector="General Market", industry="",
-            exchange="NSE",
-            current_price=current_price,
-            mkt_cap=None, beta=None,
-            pe_ratio="N/A", debt_equity="N/A",
-            dividend_msg=None,
-            business_summary=f"{display} listed on NSE India.",
-            company_name=display,
-            currency="₹"
-        )
-
-    except Exception as e:
-        return {"error": f"Error fetching '{display}': {str(e)}"}
+    return {"error": f"'{display}' not found on NSE or BSE. Please try again in a moment."}
 
 
 # ── Global stocks via FMP ─────────────────────────────────────────────────────
@@ -293,7 +305,6 @@ def compare(t1: str, t2: str):
 @app.get("/api/search/{query}")
 def search_stocks(query: str):
     results = []
-
     data = fmp_get("/search-name", {"query": query, "limit": 4})
     if not isinstance(data, list):
         data = fmp_get("/search-symbol", {"query": query, "limit": 4})
@@ -310,25 +321,28 @@ def search_stocks(query: str):
             results.append({"symbol": sym, "name": f"{sym} (NSE)", "exchange": "NSE"})
 
     return results[:7]
-    
+
+
+@app.get("/debug/indian/{ticker}")
+def debug_indian(ticker: str):
+    display = clean_ticker(ticker)
+    session = make_yf_session()
+    results = {}
+    for suffix in [".NS", ".BO"]:
+        yf_sym = display + suffix
+        try:
+            obj = yf.Ticker(yf_sym, session=session)
+            df  = obj.history(period="5d")
+            results[yf_sym] = {
+                "rows": len(df) if df is not None else 0,
+                "empty": df.empty if df is not None else True,
+                "cols": list(df.columns) if df is not None and not df.empty else []
+            }
+        except Exception as e:
+            results[yf_sym] = {"error": str(e)}
+    return results
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "global": "FMP Stable", "indian": "openchart/NSE"}
-
-@app.get("/debug/indian/{ticker}")
-def debug_indian(ticker: str):
-    display = ticker.upper().replace(".NS","").replace(".BO","")
-    try:
-        end   = datetime.now()
-        start = end - timedelta(days=30)
-        search_result = nse.search(display, "EQ")
-        df = nse.historical(f"{display}-EQ", "EQ", start, end, "1d")
-        return {
-            "search": search_result.to_dict() if search_result is not None else "None",
-            "rows": len(df) if df is not None else 0,
-            "error": None
-        }
-    except Exception as e:
-        return {"error": str(e), "type": type(e).__name__}
+    return {"status": "ok", "global": "FMP Stable", "indian": "yfinance+session"}
