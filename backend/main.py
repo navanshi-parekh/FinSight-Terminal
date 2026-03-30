@@ -1,5 +1,5 @@
 # main.py — FinSight Terminal Backend
-# FMP for global stocks + Finnhub for Indian stocks (NSE/BSE)
+# FMP for global stocks + openchart for Indian stocks (NSE/BSE, no API key needed)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,7 +7,7 @@ import httpx
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-import time
+from openchart import NSEData
 
 app = FastAPI()
 
@@ -18,10 +18,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-FMP_KEY     = "tmRl3Cj23ZcuadgcojQKefrai83sKIwP"
-FMP_BASE    = "https://financialmodelingprep.com/stable"
-FINNHUB_KEY = "d751ilhr01qg1eo78j40d751ilhr01qg1eo78j4g"
-FINNHUB_BASE = "https://finnhub.io/api/v1"
+FMP_KEY  = "tmRl3Cj23ZcuadgcojQKefrai83sKIwP"
+FMP_BASE = "https://financialmodelingprep.com/stable"
+
+# Initialise NSE client once at startup
+nse = NSEData()
 
 INDIAN_SUFFIXES = (".NS", ".BO")
 
@@ -36,8 +37,8 @@ KNOWN_NSE = {
     "BAJAJFINSV", "BRITANNIA", "HEROMOTOCO", "ITC", "M&M", "VEDL",
     "ASHOKLEY", "TATAPOWER", "IRCTC", "PIDILITIND", "SIEMENS", "HAVELLS",
     "DMART", "NAUKRI", "ZOMATO", "PAYTM", "NYKAA", "POLICYBAZAAR",
-    "HDFCLIFE", "SBILIFE", "ICICIPRULI", "BAJAJ-AUTO", "TATACONSUM",
-    "AMBUJACEM", "SHREECEM", "GAIL", "IOC", "SAIL", "NMDC", "MUTHOOTFIN",
+    "HDFCLIFE", "SBILIFE", "ICICIPRULI", "TATACONSUM", "AMBUJACEM",
+    "SHREECEM", "GAIL", "IOC", "SAIL", "NMDC", "MUTHOOTFIN",
     "BANKBARODA", "PNB", "CANBK", "UNIONBANK", "FEDERALBNK", "IDFCFIRSTB",
     "PERSISTENT", "COFORGE", "LTIM", "MPHASIS", "OFSS", "KPITTECH",
 }
@@ -52,18 +53,6 @@ def is_indian(ticker: str) -> bool:
 
 def clean_ticker(ticker: str) -> str:
     return ticker.upper().replace(".NS", "").replace(".BO", "")
-
-
-def finnhub_get(path: str, params: dict = {}) -> dict | list:
-    params = {**params, "token": FINNHUB_KEY}
-    try:
-        with httpx.Client(timeout=20) as client:
-            r = client.get(f"{FINNHUB_BASE}{path}", params=params)
-            r.raise_for_status()
-            return r.json()
-    except Exception as e:
-        print(f"[FINNHUB ERROR] {path}: {e}")
-        return {}
 
 
 def fmp_get(path: str, params: dict = {}) -> dict | list:
@@ -157,74 +146,47 @@ def build_metrics(ticker, prices, volumes, sector, industry, exchange,
     }
 
 
-# ── Indian stocks via Finnhub ─────────────────────────────────────────────────
+# ── Indian stocks via openchart ───────────────────────────────────────────────
 
 def process_indian_stock(ticker: str) -> dict:
-    display      = clean_ticker(ticker)
-    finnhub_sym  = f"NSE:{display}"
+    display  = clean_ticker(ticker)
+    # openchart uses "SYMBOL-EQ" format for equities
+    oc_symbol = f"{display}-EQ"
 
-    # 1. Quote (current price)
-    quote = finnhub_get("/quote", {"symbol": finnhub_sym})
-    if not quote or quote.get("c", 0) == 0:
-        # Try BSE
-        finnhub_sym = f"BSE:{display}"
-        quote = finnhub_get("/quote", {"symbol": finnhub_sym})
-        exchange = "BSE"
-    else:
-        exchange = "NSE"
+    try:
+        end   = datetime.now()
+        start = end - timedelta(days=400)  # extra buffer for trading days
 
-    if not quote or quote.get("c", 0) == 0:
-        return {"error": f"'{display}' not found on NSE or BSE via Finnhub."}
+        df = nse.historical(oc_symbol, "EQ", start, end, "1d")
 
-    current_price = quote.get("c", 0)
+        if df is None or df.empty:
+            return {"error": f"'{display}' not found on NSE via openchart."}
 
-    # 2. Company profile
-    profile = finnhub_get("/stock/profile2", {"symbol": finnhub_sym})
-    company_name     = profile.get("name") or display
-    sector           = profile.get("finnhubIndustry") or "General Market"
-    industry         = sector
-    business_summary = f"{company_name} is listed on {exchange}. Sector: {sector}."
-    mkt_cap_raw      = profile.get("marketCapitalization")
-    mkt_cap          = int(mkt_cap_raw * 1e6) if mkt_cap_raw else None
-    beta             = None  # Finnhub free tier doesn't provide beta for NSE
+        # openchart returns a DataFrame with columns: Open High Low Close Volume, index=Timestamp
+        df.index = pd.to_datetime(df.index)
+        prices  = df["Close"].ffill().dropna()
+        volumes = df["Volume"].ffill().dropna()
 
-    # 3. Basic financials
-    fins = finnhub_get("/stock/metric", {"symbol": finnhub_sym, "metric": "all"})
-    metrics = fins.get("metric", {})
-    pe_raw      = metrics.get("peBasicExclExtraTTM") or metrics.get("peTTM")
-    pe_ratio    = round(float(pe_raw), 2) if pe_raw else "N/A"
-    de_raw      = metrics.get("totalDebt/totalEquityAnnual")
-    debt_equity = round(float(de_raw), 2) if de_raw else "N/A"
-    div_raw     = metrics.get("dividendYieldIndicatedAnnual") or 0
-    dividend_msg = f"💰 Dividend ({round(float(div_raw), 2)}%)" if div_raw and float(div_raw) > 0 else None
+        if prices.empty:
+            return {"error": f"No price data for '{display}'."}
 
-    # 4. Historical candles (Finnhub uses Unix timestamps)
-    end_ts   = int(time.time())
-    start_ts = int((datetime.now() - timedelta(days=365)).timestamp())
+        current_price = float(prices.iloc[-1])
 
-    candles = finnhub_get("/stock/candle", {
-        "symbol":     finnhub_sym,
-        "resolution": "D",
-        "from":       start_ts,
-        "to":         end_ts,
-    })
+        return build_metrics(
+            display, prices, volumes,
+            sector="General Market", industry="",
+            exchange="NSE",
+            current_price=current_price,
+            mkt_cap=None, beta=None,
+            pe_ratio="N/A", debt_equity="N/A",
+            dividend_msg=None,
+            business_summary=f"{display} listed on NSE India.",
+            company_name=display,
+            currency="₹"
+        )
 
-    if not candles or candles.get("s") != "ok" or not candles.get("c"):
-        return {"error": f"No historical data for '{display}' on Finnhub."}
-
-    closes  = candles["c"]
-    volumes = candles.get("v", [1] * len(closes))
-    timestamps = candles["t"]
-
-    dates   = pd.to_datetime(timestamps, unit="s").normalize()
-    prices  = pd.Series(closes, index=dates, dtype=float).ffill().dropna()
-    vols    = pd.Series(volumes, index=dates, dtype=float).ffill().dropna()
-
-    return build_metrics(
-        display, prices, vols, sector, industry, exchange,
-        current_price, mkt_cap, beta, pe_ratio, debt_equity,
-        dividend_msg, business_summary, company_name, currency="₹"
-    )
+    except Exception as e:
+        return {"error": f"Error fetching '{display}': {str(e)}"}
 
 
 # ── Global stocks via FMP ─────────────────────────────────────────────────────
@@ -291,7 +253,6 @@ def process_stock_data(ticker: str) -> dict:
         return process_indian_stock(ticker)
     result = process_fmp_stock(ticker)
     if "error" in result:
-        # Last resort: try as Indian stock
         indian = process_indian_stock(ticker)
         if "error" not in indian:
             return indian
@@ -334,7 +295,6 @@ def compare(t1: str, t2: str):
 def search_stocks(query: str):
     results = []
 
-    # FMP search for global stocks
     data = fmp_get("/search-name", {"query": query, "limit": 4})
     if not isinstance(data, list):
         data = fmp_get("/search-symbol", {"query": query, "limit": 4})
@@ -344,7 +304,6 @@ def search_stocks(query: str):
             for i in data if i.get("symbol")
         ]
 
-    # NSE suggestions from known list
     query_upper = query.upper()
     nse_matches = sorted([s for s in KNOWN_NSE if s.startswith(query_upper)])[:3]
     for sym in nse_matches:
@@ -356,4 +315,4 @@ def search_stocks(query: str):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "global": "FMP Stable", "indian": "Finnhub"}
+    return {"status": "ok", "global": "FMP Stable", "indian": "openchart/NSE"}
