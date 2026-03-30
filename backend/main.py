@@ -1,5 +1,5 @@
 # main.py — FinSight Terminal Backend
-# FMP for global + direct NSE India API for Indian stocks (no third-party libs)
+# FMP for global + direct NSE India JSON API for Indian stocks
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,7 +20,6 @@ app.add_middleware(
 FMP_KEY  = "tmRl3Cj23ZcuadgcojQKefrai83sKIwP"
 FMP_BASE = "https://financialmodelingprep.com/stable"
 
-# NSE headers — required to avoid 401/403
 NSE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept": "*/*",
@@ -75,7 +74,7 @@ def fmp_get(path: str, params: dict = {}) -> dict | list:
 
 
 def get_nse_cookies() -> dict:
-    """Get session cookies from NSE homepage — required for API calls."""
+    """Visit NSE homepage to get session cookies."""
     try:
         with httpx.Client(timeout=15, headers=NSE_HEADERS, follow_redirects=True) as client:
             r = client.get("https://www.nseindia.com")
@@ -86,49 +85,45 @@ def get_nse_cookies() -> dict:
 
 
 def fetch_nse_historical(symbol: str) -> pd.DataFrame:
-    """Fetch 1 year of daily historical data from NSE India directly."""
+    """Fetch 1 year daily data from NSE India JSON API."""
     end   = datetime.now()
     start = end - timedelta(days=365)
 
     end_str   = end.strftime("%d-%m-%Y")
     start_str = start.strftime("%d-%m-%Y")
 
-    url = (
-        f"https://www.nseindia.com/api/historical/cm/equity"
-        f"?symbol={symbol}&series=[%22EQ%22]"
-        f"&from={start_str}&to={end_str}&csv=true"
-    )
-
     cookies = get_nse_cookies()
 
+    params = {
+        "symbol": symbol,
+        "series": '["EQ"]',
+        "from":   start_str,
+        "to":     end_str,
+    }
+
     with httpx.Client(timeout=20, headers=NSE_HEADERS, follow_redirects=True) as client:
-        r = client.get(url, cookies=cookies)
+        r = client.get(
+            "https://www.nseindia.com/api/historical/cm/equity",
+            params=params,
+            cookies=cookies
+        )
         r.raise_for_status()
 
-        # NSE returns CSV text
-        from io import StringIO
-        df = pd.read_csv(StringIO(r.text))
+        data    = r.json()
+        records = data.get("data", [])
 
-        # Clean column names
-        df.columns = [c.strip() for c in df.columns]
-
-        # NSE CSV columns: Date, series, OPEN, HIGH, LOW, PREV. CLOSE, LTP, close, vwap, 52W H, 52W L, VOLUME, VALUE, No of trades
-        date_col  = next((c for c in df.columns if "date" in c.lower()), None)
-        close_col = next((c for c in df.columns if c.lower() in ["close", "ltp", "last"]), None)
-        vol_col   = next((c for c in df.columns if "volume" in c.lower()), None)
-
-        if not date_col or not close_col:
+        if not records:
             return pd.DataFrame()
 
-        df[date_col]  = pd.to_datetime(df[date_col].str.strip(), dayfirst=True)
-        df[close_col] = pd.to_numeric(df[close_col].astype(str).str.replace(",", ""), errors="coerce")
+        df = pd.DataFrame(records)
 
-        df = df.sort_values(date_col).set_index(date_col)
+        # NSE JSON fields
+        df["CH_TIMESTAMP"] = pd.to_datetime(df["CH_TIMESTAMP"])
+        df = df.sort_values("CH_TIMESTAMP").set_index("CH_TIMESTAMP")
+
         result = pd.DataFrame()
-        result["Close"]  = df[close_col]
-        if vol_col:
-            df[vol_col]      = pd.to_numeric(df[vol_col].astype(str).str.replace(",", ""), errors="coerce")
-            result["Volume"] = df[vol_col]
+        result["Close"]  = pd.to_numeric(df["CH_CLOSING_PRICE"], errors="coerce")
+        result["Volume"] = pd.to_numeric(df["CH_TOT_TRAD_QTY"],  errors="coerce")
 
         return result.dropna(subset=["Close"])
 
@@ -212,7 +207,7 @@ def build_metrics(ticker, prices, volumes, sector, industry, exchange,
     }
 
 
-# ── Indian stocks via direct NSE API ─────────────────────────────────────────
+# ── Indian stocks via NSE Direct API ─────────────────────────────────────────
 
 def process_indian_stock(ticker: str) -> dict:
     display = clean_ticker(ticker)
