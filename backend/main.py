@@ -333,6 +333,35 @@ def debug_indian(ticker: str):
     except Exception as e:
         return {"error": str(e), "type": type(e).__name__}
 
+@app.get("/debug/oc/{ticker}")
+def debug_oc(ticker: str):
+    display = ticker.upper()
+    results = {}
+    end   = datetime.now()
+    start = end - timedelta(days=10)
+    
+    # Try every possible format
+    combos = [
+        (f"{display}-EQ", "EQ"),
+        (display, "EQ"),
+        (f"{display}-EQ", "NSE"),
+        (display, "NSE"),
+        (f"{display}EQ", "EQ"),
+    ]
+    
+    for sym, exch in combos:
+        key = f"{sym}|{exch}"
+        try:
+            df = nse.historical(sym, exch, start, end, "1d")
+            results[key] = {
+                "rows": len(df) if df is not None else 0,
+                "empty": df.empty if df is not None else True,
+            }
+        except Exception as e:
+            results[key] = {"error": str(e)}
+    
+    return results
+
 
 @app.get("/health")
 def health():
