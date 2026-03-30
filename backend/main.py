@@ -311,8 +311,25 @@ def search_stocks(query: str):
             results.append({"symbol": sym, "name": f"{sym} (NSE)", "exchange": "NSE"})
 
     return results[:7]
+    
 
 
 @app.get("/health")
 def health():
     return {"status": "ok", "global": "FMP Stable", "indian": "openchart/NSE"}
+
+@app.get("/debug/indian/{ticker}")
+def debug_indian(ticker: str):
+    display = ticker.upper().replace(".NS","").replace(".BO","")
+    try:
+        end   = datetime.now()
+        start = end - timedelta(days=30)
+        search_result = nse.search(display, "EQ")
+        df = nse.historical(f"{display}-EQ", "EQ", start, end, "1d")
+        return {
+            "search": search_result.to_dict() if search_result is not None else "None",
+            "rows": len(df) if df is not None else 0,
+            "error": None
+        }
+    except Exception as e:
+        return {"error": str(e), "type": type(e).__name__}
