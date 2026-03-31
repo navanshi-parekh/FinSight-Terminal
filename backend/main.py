@@ -1,5 +1,5 @@
 # main.py — FinSight Terminal Backend
-# FMP for global stocks + Twelve Data for Indian stocks (NSE/BSE)
+# FMP for global stocks + Alpha Vantage for Indian stocks (NSE/BSE)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,10 +17,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-FMP_KEY   = "tmRl3Cj23ZcuadgcojQKefrai83sKIwP"
-FMP_BASE  = "https://financialmodelingprep.com/stable"
-TD_KEY    = "90b58bb09bb24eec8a9dcad7c663d8ce"
-TD_BASE   = "https://api.twelvedata.com"
+FMP_KEY  = "tmRl3Cj23ZcuadgcojQKefrai83sKIwP"
+FMP_BASE = "https://financialmodelingprep.com/stable"
+AV_KEY   = "L9R6ZJKKT51ANPTY"
+AV_BASE  = "https://www.alphavantage.co/query"
 
 INDIAN_SUFFIXES = (".NS", ".BO")
 
@@ -65,15 +65,15 @@ def fmp_get(path: str, params: dict = {}) -> dict | list:
         return {}
 
 
-def td_get(path: str, params: dict = {}) -> dict:
-    params = {**params, "apikey": TD_KEY}
+def av_get(params: dict = {}) -> dict:
+    params = {**params, "apikey": AV_KEY}
     try:
-        with httpx.Client(timeout=20) as client:
-            r = client.get(f"{TD_BASE}{path}", params=params)
+        with httpx.Client(timeout=30) as client:
+            r = client.get(AV_BASE, params=params)
             r.raise_for_status()
             return r.json()
     except Exception as e:
-        print(f"[TD ERROR] {path}: {e}")
+        print(f"[AV ERROR] {e}")
         return {}
 
 
@@ -156,77 +156,70 @@ def build_metrics(ticker, prices, volumes, sector, industry, exchange,
     }
 
 
-# ── Indian stocks via Twelve Data ─────────────────────────────────────────────
+# ── Indian stocks via Alpha Vantage ──────────────────────────────────────────
 
 def process_indian_stock(ticker: str) -> dict:
     display = clean_ticker(ticker)
 
-    # Twelve Data uses "NSE" as exchange for Indian stocks
-    # 1. Time series (historical prices)
-    ts = td_get("/time_series", {
-        "symbol":     display,
-        "exchange":   "NSE",
-        "interval":   "1day",
-        "outputsize": 365,
-        "format":     "JSON",
-    })
-
-    if not ts or ts.get("status") == "error" or "values" not in ts:
-        # Try BSE
-        ts = td_get("/time_series", {
-            "symbol":     display,
-            "exchange":   "BSE",
-            "interval":   "1day",
-            "outputsize": 365,
-            "format":     "JSON",
+    # Alpha Vantage uses BSE: prefix for Indian stocks e.g. BSE:ASHOKLEY
+    # Try NSE first with .BSE suffix format, then plain
+    for av_symbol, exch in [
+        (f"BSE:{display}", "BSE"),
+        (f"NSE:{display}", "NSE"),
+        (display,          "NSE"),
+    ]:
+        data = av_get({
+            "function":   "TIME_SERIES_DAILY",
+            "symbol":     av_symbol,
+            "outputsize": "full",
         })
-        exchange = "BSE"
-    else:
-        exchange = "NSE"
 
-    if not ts or "values" not in ts:
-        msg = ts.get("message", "Not found") if ts else "No response"
-        return {"error": f"'{display}' not found on NSE/BSE via Twelve Data: {msg}"}
+        # Check for rate limit
+        if "Note" in data or "Information" in data:
+            note = data.get("Note") or data.get("Information", "")
+            return {"error": f"Alpha Vantage rate limit reached. Try again in a minute. ({note[:80]})"}
 
-    # Build DataFrame — TD returns newest first
-    records = ts["values"]
-    df = pd.DataFrame(records)
-    df["datetime"] = pd.to_datetime(df["datetime"])
-    df = df.sort_values("datetime").set_index("datetime")
+        ts = data.get("Time Series (Daily)")
+        if ts:
+            df = pd.DataFrame.from_dict(ts, orient="index")
+            df.index = pd.to_datetime(df.index)
+            df = df.sort_index()
 
-    prices  = pd.to_numeric(df["close"],  errors="coerce").ffill().dropna()
-    volumes = pd.to_numeric(df["volume"], errors="coerce").ffill().dropna() if "volume" in df.columns else pd.Series(dtype=float)
+            # Keep only last 365 days
+            cutoff = datetime.now() - timedelta(days=365)
+            df = df[df.index >= pd.Timestamp(cutoff)]
 
-    if prices.empty:
-        return {"error": f"No price data for '{display}'."}
+            prices  = pd.to_numeric(df["4. close"],  errors="coerce").ffill().dropna()
+            volumes = pd.to_numeric(df["5. volume"], errors="coerce").ffill().dropna()
 
-    current_price = float(prices.iloc[-1])
+            if not prices.empty:
+                current_price = float(prices.iloc[-1])
 
-    # 2. Company profile from Twelve Data
-    profile = td_get("/profile", {"symbol": display, "exchange": exchange})
-    company_name     = profile.get("name") or display
-    sector           = profile.get("sector") or "General Market"
-    industry         = profile.get("industry") or ""
-    business_summary = profile.get("description") or f"{display} listed on {exchange} India."
-    mkt_cap          = profile.get("market_cap") or None
+                # Company overview
+                overview = av_get({"function": "OVERVIEW", "symbol": av_symbol})
+                company_name     = overview.get("Name") or display
+                sector           = overview.get("Sector") or "General Market"
+                industry         = overview.get("Industry") or ""
+                business_summary = overview.get("Description") or f"{display} listed on {exch} India."
+                mkt_cap_raw      = overview.get("MarketCapitalization")
+                mkt_cap          = int(mkt_cap_raw) if mkt_cap_raw and mkt_cap_raw != "None" else None
+                beta_raw         = overview.get("Beta")
+                beta             = float(beta_raw) if beta_raw and beta_raw != "None" else None
 
-    # 3. Statistics
-    stats = td_get("/statistics", {"symbol": display, "exchange": exchange})
-    valuations = stats.get("valuations_metrics", {})
-    financials = stats.get("financials", {})
+                pe_raw      = overview.get("TrailingPE")
+                pe_ratio    = round(float(pe_raw), 2) if pe_raw and pe_raw != "None" else "N/A"
+                de_raw      = overview.get("DebtToEquityRatio") or overview.get("DebtEquityRatio")
+                debt_equity = round(float(de_raw), 2) if de_raw and de_raw != "None" else "N/A"
+                div_raw     = overview.get("DividendYield")
+                dividend_msg = f"💰 Dividend ({round(float(div_raw)*100, 2)}%)" if div_raw and div_raw != "None" and float(div_raw) > 0 else None
 
-    pe_raw      = valuations.get("trailing_pe")
-    pe_ratio    = round(float(pe_raw), 2) if pe_raw else "N/A"
-    de_raw      = financials.get("balance_sheet", {}).get("total_debt_to_equity_mrq")
-    debt_equity = round(float(de_raw), 2) if de_raw else "N/A"
-    div_raw     = stats.get("dividends_and_splits", {}).get("forward_annual_dividend_yield")
-    dividend_msg = f"💰 Dividend ({round(float(div_raw)*100, 2)}%)" if div_raw and float(div_raw) > 0 else None
+                return build_metrics(
+                    display, prices, volumes, sector, industry, exch,
+                    current_price, mkt_cap, beta, pe_ratio, debt_equity,
+                    dividend_msg, business_summary, company_name, currency="₹"
+                )
 
-    return build_metrics(
-        display, prices, volumes, sector, industry, exchange,
-        current_price, mkt_cap, None, pe_ratio, debt_equity,
-        dividend_msg, business_summary, company_name, currency="₹"
-    )
+    return {"error": f"'{display}' not found on NSE/BSE via Alpha Vantage. Check the ticker symbol."}
 
 
 # ── Global stocks via FMP ─────────────────────────────────────────────────────
@@ -355,23 +348,20 @@ def search_stocks(query: str):
 @app.get("/debug/indian/{ticker}")
 def debug_indian(ticker: str):
     display = clean_ticker(ticker)
-    ts = td_get("/time_series", {
-        "symbol":     display,
-        "exchange":   "NSE",
-        "interval":   "1day",
-        "outputsize": 5,
-        "format":     "JSON",
-    })
-    return {
-        "symbol":   display,
-        "td_status": ts.get("status") if ts else "no response",
-        "td_keys":  list(ts.keys()) if ts else [],
-        "message":  ts.get("message", ""),
-        "rows":     len(ts.get("values", [])) if ts else 0,
-        "sample":   ts.get("values", [])[:2] if ts else [],
-    }
+    results = {}
+    for av_sym in [f"BSE:{display}", f"NSE:{display}", display]:
+        data = av_get({"function": "TIME_SERIES_DAILY", "symbol": av_sym, "outputsize": "compact"})
+        ts   = data.get("Time Series (Daily)", {})
+        results[av_sym] = {
+            "rows":    len(ts),
+            "note":    data.get("Note",""),
+            "info":    data.get("Information",""),
+            "error":   data.get("Error Message",""),
+            "sample":  list(ts.items())[:1] if ts else [],
+        }
+    return results
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "global": "FMP Stable", "indian": "Twelve Data"}
+    return {"status": "ok", "global": "FMP Stable", "indian": "Alpha Vantage"}
